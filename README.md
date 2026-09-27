@@ -20,7 +20,7 @@ Open [http://localhost:3000](http://localhost:3000). PostgreSQL and the web app 
 ### Try the prototype
 
 1. Create a subject such as **Analysis**.
-2. Add a covered topic, such as **Convergent sequences**. You can also upload or remove a `.txt`, `.md`, or text-based `.pdf` resource and review any topic suggestions before adding them.
+2. Add a covered topic, such as **Convergent sequences**. You can also upload or remove a `.txt`, `.md`, or text-based `.pdf` resource and review any topic suggestions before adding them. Click a resource name to inspect all of its extracted text.
 3. Use the topic selector beneath the subject name, then press **Practice**. The app chooses the problem level from earlier attempts and opens a problem immediately. With no AI configured, it uses a repeatable demonstration prompt.
 4. Ask for a hint, write an answer, choose how difficult it felt, and submit. The demo checker records the attempt as uncertain; it cannot judge your mathematics. Reveal the reference solution afterward.
 5. Return to the subject page to see its updated review state. The scheduler uses your rating and the answer check; the demo checker marks answers uncertain, so it schedules another review soon.
@@ -29,7 +29,7 @@ The first version works with one problem at a time. It saves generated problems 
 
 To stop the app, press Ctrl-C or run `docker compose down`. `docker compose down -v` also deletes the local database and uploads.
 
-Without an AI provider, the app uses repeatable demo problems and hints. For live AI, enter an OpenAI API key in the app, use Codex CLI, or run an optional local model with Ollama. Keep keys out of source control.
+Without an AI provider, the app uses repeatable demo problems and hints. For AI practice, configure an offline Ollama model or your local Codex CLI login. An OpenAI API key remains optional. Keep keys out of source control.
 
 ### Optional Codex CLI backend
 

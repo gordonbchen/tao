@@ -8,6 +8,7 @@ import { api, AppShell, isPendingRemoval, LoadingCard, scheduleUndoDelete, Subje
 
 type Topic = { id: string; name: string };
 type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; suggestedTopics?: string[] };
+type ResourceText = Resource & { extractedText: string };
 
 export default function SubjectPage() {
   const { subjectId: id } = useParams<{ subjectId: string }>();
@@ -23,6 +24,8 @@ export default function SubjectPage() {
   const [editedName, setEditedName] = useState("");
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<{ resource: Resource; topics: string[] } | null>(null);
+  const [resourceText, setResourceText] = useState<ResourceText | null>(null);
+  const [resourceTextLoading, setResourceTextLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -118,6 +121,14 @@ export default function SubjectPage() {
     });
   }
 
+  async function showResourceText(resource: Resource) {
+    setResourceTextLoading(true);
+    setError("");
+    try { setResourceText(await api<ResourceText>(`/api/resources/${resource.id}`)); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not load extracted text"); }
+    finally { setResourceTextLoading(false); }
+  }
+
   async function addSuggestedTopic(name: string) {
     try {
       await api(`/api/subjects/${id}/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
@@ -153,10 +164,11 @@ export default function SubjectPage() {
       <section className="simple-section">
         <div className="section-title-row"><h2>Resources</h2><button className="button" type="button" onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />Add</button></div>
         <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" hidden onChange={e => uploadFile(e.target.files?.[0])} />
-        {resources.length > 0 && <ul className="simple-list resource-list">{resources.map((resource) => <li key={resource.id}><FileText size={18} /><span>{resource.filename}</span><button className="icon-action" aria-label={`Remove ${resource.filename}`} title="Remove resource" onClick={() => removeResource(resource)}><Trash2 size={18} /></button></li>)}</ul>}
+        {resources.length > 0 && <ul className="simple-list resource-list">{resources.map((resource) => <li key={resource.id}><FileText size={18} /><button className="resource-open" type="button" onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text">{resource.filename}</button><button className="icon-action" aria-label={`Remove ${resource.filename}`} title="Remove resource" onClick={() => removeResource(resource)}><Trash2 size={18} /></button></li>)}</ul>}
       </section>
     </>}
 
     {suggestions && suggestions.topics.length > 0 && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSuggestions(null); }}><div className="modal"><div className="modal-head"><h2>Suggested topics</h2><button className="modal-close" aria-label="Close" onClick={() => setSuggestions(null)}>×</button></div><ul className="simple-list">{suggestions.topics.map((topic) => <li key={topic}><span>{topic}</span><button className="button" onClick={() => addSuggestedTopic(topic)}><Plus size={18} />Add</button></li>)}</ul><div className="modal-actions"><button className="button" onClick={() => setSuggestions(null)}>Done</button></div></div></div>}
+    {resourceText && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setResourceText(null); }}><div className="modal resource-modal" role="dialog" aria-modal="true" aria-label={`Extracted text from ${resourceText.filename}`}><div className="modal-head"><h2>{resourceText.filename}</h2><button className="modal-close" aria-label="Close" onClick={() => setResourceText(null)}><X size={19} /></button></div><p className="resource-caption">Extracted text · {resourceText.extractedText.length.toLocaleString()} characters</p>{resourceText.extractedText ? <pre className="resource-extracted">{resourceText.extractedText}</pre> : <p>No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>}</div></div>}
   </main></AppShell>;
 }

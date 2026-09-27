@@ -64,6 +64,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .simple-list li { min-height: 56px; padding: 9px 4px 9px 0; display: flex; align-items: center; gap: 13px; border-bottom: 1px solid var(--line); }
 .simple-list li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .resource-list li > svg { flex: none; color: var(--muted); }
+.resource-open { flex: 1; min-width: 0; padding: 4px 0; border: 0; background: transparent; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.resource-open:hover { color: var(--accent); text-decoration: underline; }
+.resource-modal { width: min(100%, 760px); }
+.resource-caption { margin: -8px 0 14px; color: var(--muted); font-size: 16px; }
+.resource-extracted { max-height: min(60vh, 650px); overflow: auto; margin: 0; padding: 15px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: 15px/1.55 ui-monospace, SFMono-Regular, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .topic-edit { display: flex; align-items: center; flex: 1; gap: 6px; }
 .topic-edit input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
 .icon-action, .modal-close { display: inline-grid; place-items: center; padding: 7px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }

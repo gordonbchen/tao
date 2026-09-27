@@ -13,8 +13,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
         'lastRating', r.last_rating, 'lastCorrectness', r.last_correctness) AS review
       FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id
       WHERE t.subject_id = $1 ORDER BY t.created_at`, [subjectId]),
-    query(`SELECT id, filename, content_type AS "contentType", extraction_status AS "extractionStatus",
-      left(extracted_text, 5000) AS "extractedText", created_at AS "createdAt"
+    query(`SELECT id, filename, content_type AS "contentType", extraction_status AS "extractionStatus", created_at AS "createdAt"
       FROM resources WHERE subject_id = $1 AND owner_id = $2 ORDER BY created_at DESC`, [subjectId, LOCAL_OWNER_ID])
   ]);
   return Response.json({ subject: subjectResult.rows[0], topics: topicsResult.rows, resources: resourcesResult.rows });
