@@ -13,3 +13,4 @@
 - [x] Remove the empty Help and Settings header controls; have Codex suggest topics from resource content, with a heading fallback.
 - [x] Allow several resource files per selection and queue suggestions; use one vertical scroll area in summary viewers.
 - [x] Let a topic select multiple linked resources, save links together, and automatically regenerate its coverage summary once.
+- [x] Replace the topic resource dropdown with selected and searchable available rows.

@@ -52,6 +52,7 @@ function SubjectContent() {
   const [topicSummaryError, setTopicSummaryError] = useState("");
   const [topicEditingSummary, setTopicEditingSummary] = useState(false);
   const [selectedTopicResources, setSelectedTopicResources] = useState<string[]>([]);
+  const [resourceSearch, setResourceSearch] = useState("");
   const [savingTopicResources, setSavingTopicResources] = useState(false);
   const [resourceTopicChoice, setResourceTopicChoice] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -195,6 +196,7 @@ function SubjectContent() {
     setResourceText(null);
     setTopicSummaryError("");
     setSelectedTopicResources([]);
+    setResourceSearch("");
     setTopicEditingSummary(false);
     try {
       const detail = await api<TopicDetail>(`/api/topics/${topic.id}`);
@@ -331,6 +333,10 @@ function SubjectContent() {
     }
   }
 
+  const selectedResources = resources.filter((resource) => selectedTopicResources.includes(resource.id));
+  const availableResources = resources.filter((resource) => !selectedTopicResources.includes(resource.id)
+    && resource.filename.toLocaleLowerCase().includes(resourceSearch.trim().toLocaleLowerCase()));
+
   return <main className="content subject-content">
     <Link href="/" className="back-link"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
@@ -393,8 +399,10 @@ function SubjectContent() {
           {topicDetail.coverageSummary ? <><p className="resource-caption">Coverage summary{topicDetail.summaryProvider ? ` · ${topicDetail.summaryProvider}${topicDetail.summaryModel ? ` · ${topicDetail.summaryModel}` : ""}` : ""}</p>{topicDetail.summaryStatus !== "complete" && <p className="topic-stale-note">Linked resources changed. Refresh this summary to reflect them.</p>}{topicEditingSummary ? <textarea className="topic-summary-editor" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="topic-summary-text" text={topicDetail.coverageSummary} />}<div className="topic-summary-actions">{topicEditingSummary ? <button type="button" className="button" onClick={() => void saveTopicSummary()}>Save edits</button> : <button type="button" className="button" onClick={() => setTopicEditingSummary(true)}>Edit</button>}<button type="button" className="button button-primary" disabled={!topicDetail.resources.length || topicSummaryLoading} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</button></div></> : <div className="resource-summary-empty"><p>{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><button type="button" className="button button-primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</button></div>}
         </>}
       </section> : <section className="topic-resources-panel" role="tabpanel" aria-label="Resources linked to topic">
-        <div className="topic-resource-controls"><details className="multi-resource-picker"><summary>{selectedTopicResources.length ? `${selectedTopicResources.length} selected` : "Select resources…"}</summary><div className="multi-resource-options">{resources.length ? resources.map((resource) => <label key={resource.id}><input type="checkbox" checked={selectedTopicResources.includes(resource.id)} onChange={(event) => setSelectedTopicResources((current) => event.target.checked ? [...current, resource.id] : current.filter((id) => id !== resource.id))} /><span>{resource.filename}</span><Check size={17} aria-hidden="true" className={selectedTopicResources.includes(resource.id) ? "selected" : ""} /></label>) : <p>No resources uploaded yet.</p>}</div></details><button type="button" className="button button-primary" disabled={savingTopicResources || topicSummaryLoading || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicResources || topicSummaryLoading ? "Saving…" : "Save"}</button></div>
-        {topicDetail.resources.length ? <ul className="simple-list topic-resource-list">{topicDetail.resources.map((resource) => <li key={resource.id}><FileText size={18} /><button type="button" className="resource-open" onClick={() => void showResourceText({ id: resource.id, filename: resource.filename })}>{resource.filename}</button></li>)}</ul> : <p className="quiet-empty">No linked resources yet.</p>}
+        <div className="topic-resource-toolbar"><h3>Selected resources</h3><button type="button" className="button button-primary" disabled={savingTopicResources || topicSummaryLoading || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicResources || topicSummaryLoading ? "Saving…" : "Save"}</button></div>
+        {selectedResources.length ? <ul className="simple-list topic-resource-list">{selectedResources.map((resource) => <li key={resource.id}><button type="button" className="topic-resource-choice" aria-label={`Remove ${resource.filename} from this topic`} onClick={() => setSelectedTopicResources((current) => current.filter((resourceId) => resourceId !== resource.id))}><FileText size={18} /><span>{resource.filename}</span><Check size={18} className="choice-icon" /></button></li>)}</ul> : <p className="topic-resource-empty">No resources selected.</p>}
+        <div className="topic-resource-available"><h3>Add resources</h3><input type="search" aria-label="Search available resources" placeholder="Search resources" value={resourceSearch} onChange={(event) => setResourceSearch(event.target.value)} /></div>
+        {availableResources.length ? <ul className="simple-list topic-resource-list">{availableResources.map((resource) => <li key={resource.id}><button type="button" className="topic-resource-choice" aria-label={`Add ${resource.filename} to this topic`} onClick={() => setSelectedTopicResources((current) => [...current, resource.id])}><FileText size={18} /><span>{resource.filename}</span><Plus size={18} className="choice-icon" /></button></li>)}</ul> : <p className="topic-resource-empty">{resources.length === 0 ? "No resources uploaded yet." : resourceSearch ? "No matching resources." : "All resources selected."}</p>}
       </section>}
     </div></div>}
   </main>;
