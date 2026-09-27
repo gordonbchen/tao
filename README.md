@@ -17,7 +17,7 @@ docker compose -f compose.portable.yaml up --build
 
 Then open Tao and press **Connect AI** in the header to sign in to Codex (ChatGPT) or Claude with your own subscription. Codex shows a link and a one-time code; Claude shows a link, then asks you to paste the code from its sign-in page. The key button in the header reopens this dialog to sign in to the other provider or sign out. No `.env` file is needed; `.env.example` lists optional settings.
 
-Open [http://localhost:3000](http://localhost:3000). `compose.portable.yaml` uses a standard Docker network and publishes only the web app on local port 3000. It starts PostgreSQL, the web app, and the Codex and Claude sidecars. Logins are stored in the `codex_auth` and `claude_auth` Docker volumes. Database migrations run automatically when the app first queries the database. Data and uploads live in named Docker volumes. Source files under `app/`, `lib/`, and `db/` are mounted for development.
+Open [http://localhost:6283](http://localhost:6283). `compose.portable.yaml` uses a standard Docker network and publishes only the web app on local port 6283. It starts PostgreSQL, the web app, and the Codex and Claude sidecars. Logins are stored in the `codex_auth` and `claude_auth` Docker volumes. Database migrations run automatically when the app first queries the database. Data and uploads live in named Docker volumes. Source files under `app/`, `lib/`, and `db/` are mounted for development.
 
 Before signing in, you can organize subjects and inspect extracted text; summaries and practice need Codex or Claude.
 
@@ -59,7 +59,7 @@ docker compose -f compose.portable.yaml exec web npm run lint
 docker compose -f compose.portable.yaml exec web npm test
 ```
 
-The database should report healthy. If the AI accounts dialog says a sidecar is not running, check the `codex` or `claude` container logs. If sign-in keeps failing, press **Restart** in the dialog to get a fresh link and code. If port 3000 is occupied, change the host-side `127.0.0.1:3000:3000` mapping in `compose.portable.yaml` and open that port in the browser. The setup commands above use POSIX shell syntax; on Windows, use WSL or translate the environment-variable assignment for your shell.
+The database should report healthy. If the AI accounts dialog says a sidecar is not running, check the `codex` or `claude` container logs. If sign-in keeps failing, press **Restart** in the dialog to get a fresh link and code. If port 6283 is occupied, change the host-side port in the `127.0.0.1:6283:6283` mapping in `compose.portable.yaml` and open that port in the browser. The setup commands above use POSIX shell syntax; on Windows, use WSL or translate the environment-variable assignment for your shell.
 
 For checks outside Docker, install Node.js 22 and run `npm ci`, then:
 

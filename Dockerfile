@@ -5,5 +5,5 @@ COPY package*.json ./
 COPY scripts ./scripts
 RUN npm ci
 COPY . .
-EXPOSE 3000
+EXPOSE 6283
 CMD ["npm", "run", "dev"]

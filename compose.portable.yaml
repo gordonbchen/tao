@@ -15,9 +15,9 @@ services:
 
   web:
     build: .
-    command: ["./node_modules/.bin/next", "dev", "--hostname", "0.0.0.0"]
+    command: ["./node_modules/.bin/next", "dev", "--hostname", "0.0.0.0", "--port", "6283"]
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:6283:6283"
     environment:
       DATABASE_URL: postgres://tao:tao_local_only@db:5432/tao
       UPLOAD_DIR: /app/uploads

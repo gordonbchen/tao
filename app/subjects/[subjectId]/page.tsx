@@ -319,8 +319,8 @@ function SubjectContent() {
     setSummaryLoading(true);
     setSummaryError("");
     try {
-      const detail = await api<ResourceText>(`/api/resources/${resourceId}`, { method: "POST", headers: getAiRequestHeaders() });
-      setResourceText((current) => current?.id === resourceId ? detail : current);
+      const detail = await api<Omit<ResourceText, "topics">>(`/api/resources/${resourceId}`, { method: "POST", headers: getAiRequestHeaders() });
+      setResourceText((current) => current?.id === resourceId ? { ...current, ...detail } : current);
       setResources((current) => current.map((item) => item.id === resourceId ? { ...item, summaryStatus: "complete" } : item));
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not create a resource summary";
