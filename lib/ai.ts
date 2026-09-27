@@ -7,7 +7,7 @@ export type GeneratedProblem = {
   solution: string;
   hints: string[];
   sourceRefs: string[];
-  provider: "openai" | "ollama" | "demo";
+  provider: "openai" | "ollama" | "codex" | "demo";
 };
 
 type Context = { subject: string; topic: string; difficulty: Difficulty; excerpts: string[] };
@@ -64,35 +64,61 @@ async function ollamaJson<T>(system: string, input: string): Promise<T> {
   return JSON.parse(data.message.content) as T;
 }
 
-async function jsonFromConfiguredProvider<T>(apiKey: string | undefined, system: string, input: string): Promise<{ value: T; provider: "openai" | "ollama" }> {
+async function codexJson<T>(kind: "problem" | "feedback" | "hint", system: string, input: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ socketPath: "/run/tao-codex/socket", path: "/infer", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 190_000 }, response => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", chunk => { body += chunk; if (body.length > 64_000) request.destroy(new Error("Codex response too large")); });
+      response.on("end", () => {
+        try {
+          const parsed = JSON.parse(body);
+          if (response.statusCode !== 200) return reject(new Error(parsed.error || "Codex request failed"));
+          resolve(parsed as T);
+        } catch { reject(new Error("Codex returned invalid JSON")); }
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error("Codex request timed out")));
+    request.on("error", () => reject(new Error("Codex is unavailable. Start the local-codex Docker profile and sign in to Codex.")));
+    request.end(JSON.stringify({ kind, system, input }));
+  });
+}
+
+function hasAiProvider(apiKey?: string) {
+  return !!apiKey || process.env.AI_PROVIDER === "codex" || !!process.env.OLLAMA_BASE_URL || !!process.env.AI_BASE_URL;
+}
+
+async function jsonFromConfiguredProvider<T>(apiKey: string | undefined, system: string, input: string, kind: "problem" | "feedback" | "hint"): Promise<{ value: T; provider: "openai" | "ollama" | "codex" }> {
   if (apiKey) return { value: await openAiJson<T>(apiKey, system, input), provider: "openai" };
+  if (process.env.AI_PROVIDER === "codex") return { value: await codexJson<T>(kind, system, input), provider: "codex" };
   if (process.env.OLLAMA_BASE_URL || process.env.AI_BASE_URL) return { value: await ollamaJson<T>(system, input), provider: "ollama" };
   throw new Error("No AI provider configured");
 }
 
 export async function generateProblem(context: Context, apiKey?: string): Promise<GeneratedProblem> {
-  if (!apiKey && !process.env.OLLAMA_BASE_URL && !process.env.AI_BASE_URL) return demoProblem(context);
+  if (!hasAiProvider(apiKey)) return demoProblem(context);
   const { value: result, provider } = await jsonFromConfiguredProvider<Omit<GeneratedProblem, "provider">>(apiKey,
     "Create one accurate educational problem strictly within the supplied course coverage. Return JSON with prompt, solution, hints (3 short incremental strings), sourceRefs (array of source labels). Use \\(...\\) for inline TeX and \\[...\\] for display TeX. Never claim a topic is covered if the materials do not support it.",
-    JSON.stringify(context));
+    JSON.stringify(context), "problem");
   if (typeof result.prompt !== "string" || typeof result.solution !== "string" || !Array.isArray(result.hints)) throw new Error("AI response did not match the expected problem format");
   return { prompt: result.prompt, solution: result.solution, hints: result.hints.filter((x): x is string => typeof x === "string").slice(0, 3), sourceRefs: Array.isArray(result.sourceRefs) ? result.sourceRefs.filter((x): x is string => typeof x === "string") : [], provider };
 }
 
 export async function checkAnswer(problem: { prompt: string; solution: string }, answer: string, apiKey?: string): Promise<{ feedback: string; correctness: Correctness }> {
-  if (!apiKey && !process.env.OLLAMA_BASE_URL && !process.env.AI_BASE_URL) return { correctness: "uncertain", feedback: "Your attempt is saved. The local demo has no AI answer checker, so compare your reasoning with the solution when you are ready to reveal it." };
+  if (!hasAiProvider(apiKey)) return { correctness: "uncertain", feedback: "Your attempt is saved. The local demo has no AI answer checker, so compare your reasoning with the solution when you are ready to reveal it." };
   const { value: result } = await jsonFromConfiguredProvider<{ feedback: string; correctness: Correctness }>(apiKey,
     "Give careful educational feedback on a student's answer. Mathematical reasoning can be ambiguous: use uncertain when the available work is insufficient. Return JSON with feedback and correctness, one of correct, partial, incorrect, uncertain. Use \\(...\\) for inline TeX and \\[...\\] for display TeX. Do not overstate certainty.",
-    JSON.stringify({ problem: problem.prompt, referenceSolution: problem.solution, studentAnswer: answer }));
+    JSON.stringify({ problem: problem.prompt, referenceSolution: problem.solution, studentAnswer: answer }), "feedback");
   const valid = ["correct", "partial", "incorrect", "uncertain"].includes(result.correctness);
   if (typeof result.feedback !== "string" || !valid) return { correctness: "uncertain", feedback: "I couldn't reliably assess this response. Compare it with the solution and use your judgment." };
   return { feedback: result.feedback.slice(0, 4000), correctness: result.correctness };
 }
 
 export async function suggestHint(problem: { prompt: string; solution: string }, studentMessage: string, previousHints: string[], apiKey?: string) {
-  if (!apiKey && !process.env.OLLAMA_BASE_URL && !process.env.AI_BASE_URL) return undefined;
+  if (!hasAiProvider(apiKey)) return undefined;
   const { value } = await jsonFromConfiguredProvider<{ hint: string }>(apiKey,
     "Act as a patient tutor. Give one small, incremental hint that responds to where the student is stuck. Do not reveal the answer or full solution. Return JSON with a single hint string. Use \\(...\\) for inline TeX and \\[...\\] for display TeX.",
-    JSON.stringify({ problem: problem.prompt, solution: problem.solution, earlierHints: previousHints, studentMessage }));
+    JSON.stringify({ problem: problem.prompt, solution: problem.solution, earlierHints: previousHints, studentMessage }), "hint");
   return typeof value.hint === "string" ? value.hint.slice(0, 1200) : undefined;
 }
+import { request as httpRequest } from "node:http";

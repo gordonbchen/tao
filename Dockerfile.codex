@@ -1,0 +1,6 @@
+FROM node:22-alpine
+
+RUN npm install -g @openai/codex@0.157.1
+WORKDIR /bridge
+COPY codex-bridge ./
+CMD ["node", "server.mjs"]

@@ -1,0 +1,1 @@
+{"type":"object","properties":{"feedback":{"type":"string"},"correctness":{"type":"string","enum":["correct","partial","incorrect","uncertain"]}},"required":["feedback","correctness"],"additionalProperties":false}

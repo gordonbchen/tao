@@ -35,7 +35,10 @@ export async function POST(request: Request, { params }: RouteContext) {
     [topic.id],
   );
   const difficulty = chooseProblemDifficulty(reviewResult.rows[0]);
-  const resourceResult = await query<{ filename: string; excerpt: string }>(`SELECT filename, left(extracted_text, 3500) AS excerpt FROM resources
+  const resourceResult = await query<{ filename: string; excerpt: string }>(`SELECT filename,
+    CASE WHEN strpos(lower(extracted_text), lower($3::text)) > 0
+      THEN substring(extracted_text FROM greatest(1, strpos(lower(extracted_text), lower($3::text)) - 700) FOR 3500)
+      ELSE left(extracted_text, 3500) END AS excerpt FROM resources
     WHERE subject_id = $1 AND owner_id = $2 AND extracted_text <> ''
     ORDER BY CASE WHEN extracted_text ILIKE '%' || $3 || '%' THEN 0 ELSE 1 END, created_at DESC LIMIT 3`, [subjectId, LOCAL_OWNER_ID, topic.name]);
   const excerpts = resourceResult.rows.map((resource) => `${resource.filename}: ${resource.excerpt}`);
@@ -49,6 +52,6 @@ export async function POST(request: Request, { params }: RouteContext) {
     [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider })]);
     return Response.json({ problem: { ...result.rows[0], topicName: topic.name } }, { status: 201 });
   } catch {
-    return jsonError("The tutor could not generate a problem. Check the API key or try again.", 502);
+    return jsonError("The tutor could not generate a problem. Check the configured AI provider or try again.", 502);
   }
 }

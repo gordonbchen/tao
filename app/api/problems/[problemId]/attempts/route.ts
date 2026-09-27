@@ -20,7 +20,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!problem) return jsonError("Problem not found", 404);
   let checked: { feedback: string; correctness: Correctness };
   try { checked = await checkAnswer(problem, answer, request.headers.get("x-openai-api-key")?.trim() || undefined); }
-  catch { return jsonError("The tutor could not check this answer. Check the API key or try again.", 502); }
+  catch { return jsonError("The tutor could not check this answer. Check the configured AI provider or try again.", 502); }
   const saved = await transaction(async (client) => {
     const attempt = await client.query(`INSERT INTO attempts(problem_id, answer, rating, correctness, feedback)
       VALUES ($1, $2, $3, $4, $5) RETURNING id, answer, rating AS difficulty, correctness, feedback, created_at AS "createdAt"`,

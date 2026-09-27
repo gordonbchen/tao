@@ -25,11 +25,26 @@ Open [http://localhost:3000](http://localhost:3000). PostgreSQL and the web app 
 4. Ask for a hint, write an answer, choose how difficult it felt, and submit. The demo checker records the attempt as uncertain; it cannot judge your mathematics. Reveal the reference solution afterward.
 5. Return to the subject page to see its updated review state. The scheduler uses your rating and the answer check; the demo checker marks answers uncertain, so it schedules another review soon.
 
-The first version works with one problem at a time. It saves generated problems and attempts, but the interface does not yet offer a problem queue. Scanned or handwritten PDFs do not have OCR yet. The no-key demo uses general definition-and-example prompts; course-specific generation and AI answer feedback require Ollama or an OpenAI key. Do not put private student records in this shared demo workspace.
+The first version works with one problem at a time. It saves generated problems and attempts, but the interface does not yet offer a problem queue. Scanned or handwritten PDFs do not have OCR yet. The no-key demo uses general definition-and-example prompts; course-specific generation and AI answer feedback require Codex, Ollama, or an OpenAI key. Do not put private student records in this shared demo workspace.
 
 To stop the app, press Ctrl-C or run `docker compose down`. `docker compose down -v` also deletes the local database and uploads.
 
-Without an AI provider, the app uses repeatable demo problems and hints. For live AI, enter an OpenAI API key in the app or run an optional local model with Ollama. Keep keys out of source control.
+Without an AI provider, the app uses repeatable demo problems and hints. For live AI, enter an OpenAI API key in the app, use Codex CLI, or run an optional local model with Ollama. Keep keys out of source control.
+
+### Optional Codex CLI backend
+
+Codex CLI runs on your machine in a separate Docker container but calls OpenAI models through your Codex login. It is **not** an offline or unlimited free model. It can use ChatGPT sign-in or API-key sign-in, depending on how you logged into Codex. The sidecar has its own login directory and communicates with the web app through a Unix socket; it does not mount the app's database or uploads. This mode is for the single-user local prototype only.
+
+With Codex CLI installed on your host, create a separate login for Tao:
+
+```bash
+mkdir -p .codex-tao
+CODEX_HOME="$PWD/.codex-tao" codex login
+```
+
+Copy `.env.example` to `.env` and set `AI_PROVIDER=codex`. Then run `docker compose --profile local-codex up --build -d`. Leave the OpenAI key field blank in Tao to use Codex. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. `CODEX_MODEL` is optional. A key entered on the practice page takes precedence over Codex.
+
+Uploaded text is stored with each resource. Topic suggestions are extracted from headings and the filename; no AI analyzes uploads yet. Topics store names and review state, not a separate summary. For a new problem, the AI receives the subject, topic, selected difficulty, and up to three resource excerpts of 3,500 characters each, taken near the topic name when found. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
 
 ### Optional local AI
 

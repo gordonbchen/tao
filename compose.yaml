@@ -25,6 +25,7 @@ services:
       UPLOAD_DIR: /app/uploads
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      AI_PROVIDER: ${AI_PROVIDER:-}
     env_file:
       - path: .env
         required: false
@@ -36,6 +37,7 @@ services:
       - ./tsconfig.json:/app/tsconfig.json:ro
       - next_build:/app/.next
       - uploads:/app/uploads
+      - codex_socket:/run/tao-codex
     depends_on:
       db:
         condition: service_healthy
@@ -49,8 +51,23 @@ services:
     environment:
       OLLAMA_HOST: 127.0.0.1:11434
 
+  codex:
+    build:
+      context: .
+      dockerfile: Dockerfile.codex
+      network: host
+    network_mode: host
+    profiles: ["local-codex"]
+    environment:
+      CODEX_HOME: /codex-auth
+      CODEX_MODEL: ${CODEX_MODEL:-}
+    volumes:
+      - ${CODEX_AUTH_DIR:-./.codex-tao}:/codex-auth
+      - codex_socket:/run/tao-codex
+
 volumes:
   postgres_data:
   next_build:
   uploads:
   ollama_models:
+  codex_socket:

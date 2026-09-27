@@ -16,13 +16,13 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!problem) return jsonError("Problem not found", 404);
   const previous = await query<{ content: string }>("SELECT content FROM tutor_messages WHERE problem_id = $1 AND kind = 'hint' ORDER BY created_at", [problemId]);
   const count = previous.rows.length;
-  const hasProvider = Boolean(request.headers.get("x-openai-api-key") || process.env.OLLAMA_BASE_URL || process.env.AI_BASE_URL);
+  const hasProvider = Boolean(request.headers.get("x-openai-api-key") || process.env.AI_PROVIDER === "codex" || process.env.OLLAMA_BASE_URL || process.env.AI_BASE_URL);
   const indexedHint = problem.hints[count];
   if (!indexedHint && !hasProvider) return jsonError("You have used the available hints. Try your answer when you are ready.", 409);
   let hint = indexedHint || "";
   if (hasProvider) {
     try { hint = await suggestHint(problem, message, previous.rows.map((row) => row.content), request.headers.get("x-openai-api-key")?.trim() || undefined) || hint; }
-    catch { if (!hint) return jsonError("The tutor could not respond. Check the API key or try again.", 502); }
+    catch { if (!hint) return jsonError("The tutor could not respond. Check the configured AI provider or try again.", 502); }
   }
   await query("INSERT INTO tutor_messages(problem_id, role, kind, content) VALUES ($1, 'student', 'question', $2)", [problemId, message || "Please give me a small hint."]);
   await query("INSERT INTO tutor_messages(problem_id, role, kind, content) VALUES ($1, 'tutor', 'hint', $2)", [problemId, hint]);

@@ -1,0 +1,1 @@
+{"type":"object","properties":{"prompt":{"type":"string"},"solution":{"type":"string"},"hints":{"type":"array","items":{"type":"string"}},"sourceRefs":{"type":"array","items":{"type":"string"}}},"required":["prompt","solution","hints","sourceRefs"],"additionalProperties":false}

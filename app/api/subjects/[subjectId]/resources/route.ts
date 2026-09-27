@@ -3,17 +3,12 @@ import path from "node:path";
 import { PDFParse } from "pdf-parse";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
+import { suggestTopics } from "@/lib/topic-suggestions";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ subjectId: string }> };
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT = 200_000;
-
-function suggestTopics(text: string) {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length >= 3 && line.length <= 100);
-  const headings = lines.filter((line) => /^(#{1,6}\s|\d+(\.\d+)*[.)]?\s|chapter\s|section\s)/i.test(line) || (line === line.toUpperCase() && /[A-Z]/.test(line)));
-  return [...new Set(headings.map((line) => line.replace(/^#{1,6}\s*/, "").replace(/^\d+(\.\d+)*[.)]?\s*/, "").trim()))].filter(Boolean).slice(0, 30);
-}
 
 export async function POST(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
@@ -53,7 +48,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, filename, content_type AS "contentType", extraction_status AS "extractionStatus", left(extracted_text, 5000) AS "extractedText", created_at AS "createdAt"`,
     [id, subjectId, LOCAL_OWNER_ID, path.basename(uploaded.name).slice(0, 255), pdf ? "application/pdf" : "text/plain", storagePath, extractedText, extractionStatus]);
-    return Response.json({ ...result.rows[0], suggestedTopics: suggestTopics(extractedText), scannedPdfNotice: pdf && !extractedText.trim() ? "No selectable text was found. This may be a scanned document; OCR is not available yet." : undefined }, { status: 201 });
+    return Response.json({ ...result.rows[0], suggestedTopics: suggestTopics(extractedText, uploaded.name), scannedPdfNotice: pdf && !extractedText.trim() ? "No selectable text was found. This may be a scanned document; OCR is not available yet." : undefined }, { status: 201 });
   } catch (error) {
     await rm(storagePath, { force: true });
     throw error;
