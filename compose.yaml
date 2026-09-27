@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:16-alpine
+    network_mode: host
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+    environment:
+      POSTGRES_USER: tao
+      POSTGRES_PASSWORD: tao_local_only
+      POSTGRES_DB: tao
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tao -d tao"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      network: host
+    network_mode: host
+    environment:
+      DATABASE_URL: postgres://tao:tao_local_only@127.0.0.1:5432/tao
+      UPLOAD_DIR: /app/uploads
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./app:/app/app
+      - ./lib:/app/lib
+      - ./db:/app/db
+      - ./next.config.ts:/app/next.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - next_build:/app/.next
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:latest
+    network_mode: host
+    profiles: ["local-ai"]
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_HOST: 127.0.0.1:11434
+
+volumes:
+  postgres_data:
+  next_build:
+  uploads:
+  ollama_models:
