@@ -22,6 +22,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .app-frame { min-height: 100vh; }
 .content { width: min(100% - 48px, 900px); margin: 44px auto 80px; }
 .home-heading, .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.section-title-row { margin-bottom: 14px; }
 .home-heading { margin-bottom: 34px; }
 .home-heading h1 { margin: 0; font-size: clamp(32px, 5vw, 43px); line-height: 1.12; font-weight: 600; letter-spacing: -.025em; }
 .subjects-list { border-top: 1px solid var(--line); }
@@ -44,7 +45,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .simple-section { margin-top: 42px; }
 .simple-section h2 { margin: 0 0 14px; font-size: 25px; font-weight: 600; }
 .section-title-row h2 { margin-bottom: 0; }
-.topic-add { margin-top: 0; }
+.section-title-row .topic-add { margin: 0; align-items: center; }
 .topic-add input { width: min(34vw, 230px); }
 .simple-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
 .simple-list li { min-height: 56px; padding: 9px 4px 9px 0; display: flex; align-items: center; gap: 13px; border-bottom: 1px solid var(--line); }
