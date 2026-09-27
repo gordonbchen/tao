@@ -27,15 +27,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .site-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 600; }
 .site-brand img { background: transparent; }
 [data-theme="dark"] .site-brand img { filter: invert(1); }
-.header-actions { display: flex; align-items: center; gap: 5px; }
+.header-actions { display: flex; align-items: center; gap: 20px; }
 .header-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 39px; height: 39px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; }
 .header-actions button:hover, .header-actions button[aria-expanded="true"] { background: var(--accent-soft); }
 .model-control { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 16px; }
 .model-control span { color: var(--muted); }
 .model-control select { max-width: 160px; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
-.usage-meter { display: grid; grid-template-columns: minmax(90px, 1fr) auto; align-items: center; gap: 2px 8px; width: 190px; color: var(--ink); font-size: 14px; line-height: 1.2; }
+.usage-meter { display: grid; grid-template-columns: minmax(90px, 1fr) auto; align-items: center; gap: 2px 4px; width: 184px; color: var(--ink); font-size: 14px; line-height: 1.2; }
 .usage-meter > span { grid-column: 1 / -1; }
-.usage-meter strong { min-width: 34px; font-size: 15px; font-weight: 600; text-align: right; }
+.usage-meter strong { font-size: 15px; font-weight: 600; text-align: right; }
 .usage-track { height: 9px; overflow: hidden; border-radius: 99px; background: var(--line); }
 .usage-track > div { height: 100%; border-radius: inherit; background: #2f9a5b; transition: width .3s ease; }
 .ai-notice { position: fixed; z-index: 65; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 12px 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 8px 28px #0002; }
@@ -195,12 +195,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .site-header-inner { width: calc(100% - 32px); flex-wrap: wrap; gap: 5px; padding: 8px 0; }
   .site-brand { gap: 5px; font-size: 22px; }
   .site-brand img { width: 25px; height: 25px; }
-  .header-actions { width: 100%; justify-content: space-between; gap: 2px; }
+  .header-actions { width: 100%; justify-content: space-between; gap: 12px; }
   .model-control { gap: 2px; padding: 4px 6px; max-width: 130px; }
   .model-control span { display: none; }
   .model-control select { max-width: 112px; font-size: 14px; }
-  .usage-meter { width: 100px; grid-template-columns: 1fr auto; gap: 2px 4px; font-size: 11px; }
-  .usage-meter strong { min-width: 29px; font-size: 12px; }
+  .usage-meter { width: 114px; grid-template-columns: 1fr auto; gap: 2px 3px; font-size: 11px; }
+  .usage-meter strong { font-size: 12px; }
   body { font-size: 18px; }
   .content, .study-content { width: calc(100% - 32px); margin-top: 25px; }
   .home-heading { align-items: flex-start; }
