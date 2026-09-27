@@ -48,16 +48,24 @@ function SubjectContent() {
   const [resourceTab, setResourceTab] = useState<"summary" | "extracted">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
   const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
-  const [topicSummaryLoading, setTopicSummaryLoading] = useState(false);
-  const [topicSummaryError, setTopicSummaryError] = useState("");
+  const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
+  const [topicSummaryErrors, setTopicSummaryErrors] = useState<Record<string, string>>({});
   const [topicEditingSummary, setTopicEditingSummary] = useState(false);
   const [selectedTopicResources, setSelectedTopicResources] = useState<string[]>([]);
   const [resourceSearch, setResourceSearch] = useState("");
-  const [savingTopicResources, setSavingTopicResources] = useState(false);
+  const [savingTopicIds, setSavingTopicIds] = useState<string[]>([]);
   const [resourceTopicChoice, setResourceTopicChoice] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const activeTopicIdRef = useRef<string | null>(null);
+  const summariesInProgress = useRef(new Set<string>());
+  const summariesQueued = useRef(new Set<string>());
+
+  useEffect(() => { activeTopicIdRef.current = topicDetail?.id ?? null; }, [topicDetail?.id]);
+  function setTopicSummaryError(topicId: string, message: string) {
+    setTopicSummaryErrors((current) => ({ ...current, [topicId]: message }));
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -194,7 +202,7 @@ function SubjectContent() {
 
   async function showTopic(topic: Topic) {
     setResourceText(null);
-    setTopicSummaryError("");
+    setTopicSummaryError(topic.id, "");
     setSelectedTopicResources([]);
     setResourceSearch("");
     setTopicEditingSummary(false);
@@ -208,7 +216,7 @@ function SubjectContent() {
 
   async function refreshTopic(topicId: string) {
     const detail = await api<TopicDetail>(`/api/topics/${topicId}`);
-    if (topicDetail?.id === topicId) {
+    if (activeTopicIdRef.current === topicId) {
       setTopicDetail(detail);
       setSelectedTopicResources(detail.resources.map((resource) => resource.id));
     }
@@ -216,51 +224,64 @@ function SubjectContent() {
   }
 
   async function saveTopicResources() {
-    if (!topicDetail || savingTopicResources) return;
+    if (!topicDetail || savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id)) return;
     const topicId = topicDetail.id;
-    setSavingTopicResources(true);
-    setTopicSummaryError("");
+    const resourceIds = [...selectedTopicResources];
+    setSavingTopicIds((current) => [...current, topicId]);
+    setTopicSummaryError(topicId, "");
     try {
       const result = await api<{ changed: boolean }>(`/api/topics/${topicId}/resources`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceIds: selectedTopicResources }),
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceIds }),
       });
       await refreshTopic(topicId);
       setResources((current) => current.map((resource) => ({ ...resource,
-        topicIds: selectedTopicResources.includes(resource.id)
+        topicIds: resourceIds.includes(resource.id)
           ? [...new Set([...(resource.topicIds ?? []), topicId])]
           : (resource.topicIds ?? []).filter((linkedId) => linkedId !== topicId),
       })));
-      setTopicTab("summary");
-      if (result.changed && selectedTopicResources.length) await generateTopicSummary(topicId);
-    } catch (e) { setTopicSummaryError(e instanceof Error ? e.message : "Could not save linked resources"); }
-    finally { setSavingTopicResources(false); }
+      if (activeTopicIdRef.current === topicId) setTopicTab("summary");
+      if (result.changed && resourceIds.length) void generateTopicSummary(topicId);
+    } catch (e) { setTopicSummaryError(topicId, e instanceof Error ? e.message : "Could not save linked resources"); }
+    finally { setSavingTopicIds((current) => current.filter((id) => id !== topicId)); }
   }
 
   async function generateTopicSummary(topicId: string) {
     if (!aiSettings.ready) return;
-    if (!aiSettings.configured) { notifyAiSetupRequired(); setTopicSummaryError("Connect the local Codex sidecar to create a topic summary."); return; }
-    setTopicSummaryLoading(true);
-    setTopicSummaryError("");
+    if (!aiSettings.configured) { notifyAiSetupRequired(); setTopicSummaryError(topicId, "Connect the local Codex sidecar to create a topic summary."); return; }
+    if (summariesInProgress.current.has(topicId)) { summariesQueued.current.add(topicId); return; }
+    summariesInProgress.current.add(topicId);
+    setSummarizingTopicIds((current) => [...current, topicId]);
+    setTopicSummaryError(topicId, "");
     try {
-      const summary = await api<Pick<TopicDetail, "id" | "name" | "coverageSummary" | "summaryProvider" | "summaryModel" | "summaryStatus">>(`/api/topics/${topicId}/summary`, { method: "POST", headers: getAiRequestHeaders() });
-      setTopicDetail((current) => current?.id === topicId ? { ...current, ...summary } : current);
-      setTopics((current) => current.map((topic) => topic.id === topicId ? { ...topic, summaryStatus: "complete" } : topic));
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Could not create a topic summary";
-      setTopicSummaryError(message);
-      if (/Codex sidecar|Codex is unavailable|Codex is not signed in/i.test(message)) notifyAiSetupRequired();
-      setTopicDetail((current) => current?.id === topicId ? { ...current, summaryStatus: "failed" } : current);
-    } finally { setTopicSummaryLoading(false); }
+      do {
+        summariesQueued.current.delete(topicId);
+        try {
+          const summary = await api<Pick<TopicDetail, "id" | "name" | "coverageSummary" | "summaryProvider" | "summaryModel" | "summaryStatus">>(`/api/topics/${topicId}/summary`, { method: "POST", headers: getAiRequestHeaders() });
+          setTopicDetail((current) => current?.id === topicId ? { ...current, ...summary } : current);
+          setTopics((current) => current.map((topic) => topic.id === topicId ? { ...topic, summaryStatus: "complete" } : topic));
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Could not create a topic summary";
+          setTopicSummaryError(topicId, message);
+          if (/Codex sidecar|Codex is unavailable|Codex is not signed in/i.test(message)) notifyAiSetupRequired();
+          setTopicDetail((current) => current?.id === topicId ? { ...current, summaryStatus: "failed" } : current);
+          break;
+        }
+      } while (summariesQueued.current.has(topicId));
+    } finally {
+      summariesInProgress.current.delete(topicId);
+      setSummarizingTopicIds((current) => current.filter((id) => id !== topicId));
+    }
   }
 
   async function saveTopicSummary() {
     if (!topicDetail) return;
+    const topicId = topicDetail.id;
     try {
-      const updated = await api<Pick<TopicDetail, "id" | "coverageSummary" | "summaryStatus" | "summaryProvider" | "summaryModel">>(`/api/topics/${topicDetail.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coverageSummary: topicDetail.coverageSummary }) });
-      setTopicDetail((current) => current ? { ...current, ...updated } : current);
+      const updated = await api<Pick<TopicDetail, "id" | "coverageSummary" | "summaryStatus" | "summaryProvider" | "summaryModel">>(`/api/topics/${topicId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coverageSummary: topicDetail.coverageSummary }) });
+      setTopicDetail((current) => current?.id === topicId ? { ...current, ...updated } : current);
       setTopics((current) => current.map((topic) => topic.id === updated.id ? { ...topic, summaryStatus: "complete" } : topic));
-      setTopicEditingSummary(false);
-    } catch (e) { setTopicSummaryError(e instanceof Error ? e.message : "Could not save topic summary"); }
+      if (activeTopicIdRef.current === topicId) setTopicEditingSummary(false);
+    } catch (e) { setTopicSummaryError(topicId, e instanceof Error ? e.message : "Could not save topic summary"); }
   }
 
   async function attachResource(topicId: string, resourceId: string) {
@@ -394,12 +415,13 @@ function SubjectContent() {
         <button type="button" role="tab" aria-selected={topicTab === "resources"} className={topicTab === "resources" ? "active" : ""} onClick={() => setTopicTab("resources")}>Resources <span>{topicDetail.resources.length}</span></button>
       </div>
       {topicTab === "summary" ? <section className="topic-summary-panel" role="tabpanel" aria-label="Topic coverage summary">
-        {topicSummaryError && <p className="error-message" role="alert">{topicSummaryError}</p>}
-        {topicSummaryLoading || topicDetail.summaryStatus === "pending" ? <div className="resource-summary-state"><span className="spinner" /> Summarizing linked material…</div> : <>
-          {topicDetail.coverageSummary ? <><p className="resource-caption">Coverage summary{topicDetail.summaryProvider ? ` · ${topicDetail.summaryProvider}${topicDetail.summaryModel ? ` · ${topicDetail.summaryModel}` : ""}` : ""}</p>{topicDetail.summaryStatus !== "complete" && <p className="topic-stale-note">Linked resources changed. Refresh this summary to reflect them.</p>}{topicEditingSummary ? <textarea className="topic-summary-editor" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="topic-summary-text" text={topicDetail.coverageSummary} />}<div className="topic-summary-actions">{topicEditingSummary ? <button type="button" className="button" onClick={() => void saveTopicSummary()}>Save edits</button> : <button type="button" className="button" onClick={() => setTopicEditingSummary(true)}>Edit</button>}<button type="button" className="button button-primary" disabled={!topicDetail.resources.length || topicSummaryLoading} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</button></div></> : <div className="resource-summary-empty"><p>{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><button type="button" className="button button-primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</button></div>}
+        {topicSummaryErrors[topicDetail.id] && <p className="error-message" role="alert">{topicSummaryErrors[topicDetail.id]}</p>}
+        {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? <div className="resource-summary-state"><span className="spinner" /> Summarizing linked material…</div> : <>
+          {topicDetail.coverageSummary ? <><p className="resource-caption">Coverage summary{topicDetail.summaryProvider ? ` · ${topicDetail.summaryProvider}${topicDetail.summaryModel ? ` · ${topicDetail.summaryModel}` : ""}` : ""}</p>{topicDetail.summaryStatus !== "complete" && <p className="topic-stale-note">Linked resources changed. Refresh this summary to reflect them.</p>}{topicEditingSummary ? <textarea className="topic-summary-editor" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="topic-summary-text" text={topicDetail.coverageSummary} />}<div className="topic-summary-actions">{topicEditingSummary ? <button type="button" className="button" onClick={() => void saveTopicSummary()}>Save edits</button> : <button type="button" className="button" onClick={() => setTopicEditingSummary(true)}>Edit</button>}<button type="button" className="button button-primary" disabled={!topicDetail.resources.length || summarizingTopicIds.includes(topicDetail.id)} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</button></div></> : <div className="resource-summary-empty"><p>{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><button type="button" className="button button-primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</button></div>}
         </>}
       </section> : <section className="topic-resources-panel" role="tabpanel" aria-label="Resources linked to topic">
-        <div className="topic-resource-toolbar"><h3>Selected resources</h3><button type="button" className="button button-primary" disabled={savingTopicResources || topicSummaryLoading || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicResources || topicSummaryLoading ? "Saving…" : "Save"}</button></div>
+        {topicSummaryErrors[topicDetail.id] && <p className="error-message" role="alert">{topicSummaryErrors[topicDetail.id]}</p>}
+        <div className="topic-resource-toolbar"><h3>Selected resources</h3><button type="button" className="button button-primary" disabled={savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id) || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicIds.includes(topicDetail.id) ? "Saving…" : summarizingTopicIds.includes(topicDetail.id) ? "Summarizing…" : "Save"}</button></div>
         {selectedResources.length ? <ul className="simple-list topic-resource-list">{selectedResources.map((resource) => <li key={resource.id}><button type="button" className="topic-resource-choice" aria-label={`Remove ${resource.filename} from this topic`} onClick={() => setSelectedTopicResources((current) => current.filter((resourceId) => resourceId !== resource.id))}><FileText size={18} /><span>{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) ? <span className="resource-change-badge">Saved</span> : <span className="resource-change-badge pending">To add</span>}<Check size={18} className="choice-icon" /></button></li>)}</ul> : <p className="topic-resource-empty">No resources selected.</p>}
         <div className="topic-resource-available"><h3>Add resources</h3><input type="search" aria-label="Search available resources" placeholder="Search resources" value={resourceSearch} onChange={(event) => setResourceSearch(event.target.value)} /></div>
         {availableResources.length ? <ul className="simple-list topic-resource-list">{availableResources.map((resource) => <li key={resource.id}><button type="button" className="topic-resource-choice" aria-label={`Add ${resource.filename} to this topic`} onClick={() => setSelectedTopicResources((current) => [...current, resource.id])}><FileText size={18} /><span>{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) && <span className="resource-change-badge pending-remove">To remove</span>}<Plus size={18} className="choice-icon" /></button></li>)}</ul> : <p className="topic-resource-empty">{resources.length === 0 ? "No resources uploaded yet." : resourceSearch ? "No matching resources." : "All resources selected."}</p>}

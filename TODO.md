@@ -15,3 +15,4 @@
 - [x] Let a topic select multiple linked resources, save links together, and automatically regenerate its coverage summary once.
 - [x] Replace the topic resource dropdown with selected and searchable available rows.
 - [x] Mark staged topic resource additions and removals, and document a portable Docker setup for another machine.
+- [x] Keep topic saving and summary status independent so work on one topic does not block another.
