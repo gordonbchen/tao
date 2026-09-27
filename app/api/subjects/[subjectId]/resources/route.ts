@@ -4,6 +4,8 @@ import { PDFParse } from "pdf-parse";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
 import { suggestTopics } from "@/lib/topic-suggestions";
+import { aiOptionsFromRequest, hasAiProvider } from "@/lib/ai";
+import { suggestTopicsWithCodex } from "@/lib/ai-topic-suggestions";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ subjectId: string }> };
@@ -49,7 +51,15 @@ export async function POST(request: Request, { params }: RouteContext) {
       RETURNING id, filename, content_type AS "contentType", extraction_status AS "extractionStatus",
         summary_status AS "summaryStatus", created_at AS "createdAt"`,
     [id, subjectId, LOCAL_OWNER_ID, path.basename(uploaded.name).slice(0, 255), pdf ? "application/pdf" : "text/plain", storagePath, extractedText, extractionStatus]);
-    return Response.json({ ...result.rows[0], suggestedTopics: suggestTopics(extractedText, uploaded.name), scannedPdfNotice: pdf && !extractedText.trim() ? "No selectable text was found. This may be a scanned document; OCR is not available yet." : undefined }, { status: 201 });
+    let suggestedTopics = suggestTopics(extractedText, uploaded.name);
+    if (extractedText.trim() && hasAiProvider()) {
+      try {
+        const existing = await query<{ name: string }>("SELECT name FROM topics WHERE subject_id = $1 ORDER BY created_at", [subjectId]);
+        const fromCodex = await suggestTopicsWithCodex(uploaded.name, extractedText, existing.rows.map((row) => row.name), aiOptionsFromRequest(request));
+        if (fromCodex.length) suggestedTopics = fromCodex;
+      } catch { /* Keep the quick heading fallback when Codex cannot suggest topics. */ }
+    }
+    return Response.json({ ...result.rows[0], suggestedTopics, scannedPdfNotice: pdf && !extractedText.trim() ? "No selectable text was found. This may be a scanned document; OCR is not available yet." : undefined }, { status: 201 });
   } catch (error) {
     await rm(storagePath, { force: true });
     throw error;

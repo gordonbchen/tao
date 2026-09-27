@@ -38,9 +38,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .usage-meter strong { min-width: 34px; font-size: 15px; font-weight: 600; text-align: right; }
 .usage-track { height: 9px; overflow: hidden; border-radius: 99px; background: var(--line); }
 .usage-track > div { height: 100%; border-radius: inherit; background: #2f9a5b; transition: width .3s ease; }
-.header-popover { position: absolute; z-index: 60; top: calc(100% - 2px); right: 0; width: min(360px, 90vw); padding: 17px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 8px 28px #0002; font-size: 16px; }
-.header-popover p { margin: 8px 0 0; color: var(--muted); }
-.settings-error { color: #a32929 !important; }
+.ai-notice { position: fixed; z-index: 65; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 12px 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 8px 28px #0002; }
 .content { width: min(100% - 48px, 900px); margin: 44px auto 80px; }
 .home-heading, .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .section-title-row { margin-bottom: 14px; }

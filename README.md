@@ -3,7 +3,7 @@
 Tao is a local-first study app for course-aware practice. Add subjects and covered topics, upload notes, and practice problems selected by topic review state.
 
 The interface keeps the overview to a subject list and new-subject action. Each subject shows its topics, resources, and practice action. Text is set in the bundled Libertinus Serif font.
-The study screen renders TeX notation with locally hosted MathJax. Resource and topic summaries render Markdown and TeX. Use `\\(...\\)` for inline math and `\\[...\\]` for display math. The header provides Codex model selection, a remaining-usage bar, help, settings, and a saved dark mode toggle. Sign-in is not implemented yet.
+The study screen renders TeX notation with locally hosted MathJax. Resource and topic summaries render Markdown and TeX. Use `\\(...\\)` for inline math and `\\[...\\]` for display math. The header provides Codex model selection, a remaining-usage bar, and a saved dark mode toggle. Sign-in is not implemented yet.
 
 This prototype has one shared local demo workspace and no sign-in. Run it only on a machine or network you trust; account separation is a future milestone. Uploaded files and study data remain in local Docker volumes.
 
@@ -23,9 +23,9 @@ Open [http://localhost:3000](http://localhost:3000). PostgreSQL and the web app 
 ### Try the prototype
 
 1. Create a subject such as **Analysis**.
-2. Add a covered topic, such as **Convergent sequences**. Upload a `.txt`, `.md`, or text-based `.pdf` resource and review topic suggestions. Click a resource to see its model summary and extracted text. Click a topic to link resources and create or edit its coverage summary. If Codex is not connected, extracted text and existing summaries remain available.
-3. Check **Settings** for the Codex connection. The local CLI sidecar uses your login. Switch the selected Codex model from the header.
-4. Use the topic selector beneath the subject name, then press **Practice**. Tao chooses a problem level from earlier attempts and opens one problem. Without a configured model, Tao asks you to configure one instead of generating a demo prompt.
+2. Add a covered topic, such as **Convergent sequences**. Upload a `.txt`, `.md`, or text-based `.pdf` resource and review Codex's topic suggestions from its contents. If Codex is unavailable, Tao uses headings as a fallback. Click a resource to see its model summary and extracted text. Click a topic to link resources and create or edit its coverage summary.
+3. Check the model selector in the header for the Codex connection. The local CLI sidecar uses your login. Switch the selected Codex model there.
+4. Use the topic selector beneath the subject name, then press **Practice**. Tao chooses a problem level from earlier attempts and opens one problem. Without Codex connected, Tao shows a setup notice instead of generating a demo prompt.
 5. Ask for a hint, write an answer, choose how difficult it felt, and submit. TeX typed in the answer box appears in a preview. You can skip a question or give feedback about its quality; skipping leaves review state unchanged. Reveal the reference solution after checking your answer. Return to the subject page to see updated review state.
 
 The first version works with one problem at a time. It saves generated problems and attempts, but the interface does not yet offer a problem queue. Scanned or handwritten PDFs do not have OCR yet. Course-specific generation, summaries, and AI feedback require Codex. Do not put private student records in this shared workspace.
@@ -47,7 +47,7 @@ CODEX_HOME="$PWD/.codex-tao" codex login
 
 Copy `.env.example` to `.env`; it enables the `local-codex` Compose profile and defaults to `gpt-6-luna`. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. Choose a model in Tao's header. The first problem can take a while because the sidecar starts a fresh Codex CLI process for each inference call.
 
-Uploaded text and a model-generated summary are stored with each resource. Topic suggestions are still extracted from headings and the filename. Topics store editable coverage summaries and explicit resource links; accepting a suggested topic links its source resource. Resource summaries process extracted text in sections. For a new problem, Codex receives the subject, topic, selected difficulty, topic summary, linked excerpts, recent prompts, and recent student feedback. Older topics without links temporarily use relevant subject resources. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
+Uploaded text and a model-generated summary are stored with each resource. Codex suggests topics from sampled content across the uploaded text; if it is unavailable, headings and the filename provide a fallback. Topics store editable coverage summaries and explicit resource links; accepting a suggested topic links its source resource. Resource summaries process extracted text in sections. For a new problem, Codex receives the subject, topic, selected difficulty, topic summary, linked excerpts, recent prompts, and recent student feedback. Older topics without links temporarily use relevant subject resources. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
 
 ## Checks
 

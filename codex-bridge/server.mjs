@@ -114,7 +114,7 @@ createServer(async (request, response) => {
       if (raw.length > 100_000) throw new Error("Request too large");
     }
     const { kind, system, input, model: requestedModel } = JSON.parse(raw);
-    if (!schemas.has(kind) && kind !== "resource_summary" && kind !== "topic_summary") throw new Error("Invalid request");
+    if (!schemas.has(kind) && kind !== "resource_summary" && kind !== "topic_summary" && kind !== "topic_suggestions") throw new Error("Invalid request");
     if (typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
     if (requestedModel !== undefined && !["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"].includes(requestedModel)) throw new Error("Unsupported Codex model");
     const value = await infer(kind, system, input, requestedModel);

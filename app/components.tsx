@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { CircleHelp, Moon, Settings, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
@@ -98,7 +98,6 @@ function UndoToast() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState("light");
-  const [panel, setPanel] = useState<"help" | "settings" | null>(null);
   const [status, setStatus] = useState<AIStatus>({ available: false, models: [], defaultModel: "gpt-6-luna" });
   const [model, setModelState] = useState("gpt-6-luna");
   const [usage, setUsage] = useState<AIUsage>(emptyUsage);
@@ -123,12 +122,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }).catch(() => {
       updateAISettings({ configured: false, ready: true });
     });
-    const onSetupRequired = () => { setPanel("settings"); setAiNotice(true); };
+    const onSetupRequired = () => setAiNotice(true);
     window.addEventListener("tao:ai-setup-required", onSetupRequired);
     const usageTimer = window.setInterval(refreshUsage, 60_000);
     return () => { window.removeEventListener("tao:ai-setup-required", onSetupRequired); window.clearInterval(usageTimer); };
   }, []);
   function setModel(next: string) { updateModel(next); setModelState(next); }
+  useEffect(() => {
+    if (!aiNotice) return;
+    const timer = window.setTimeout(() => setAiNotice(false), 8000);
+    return () => window.clearTimeout(timer);
+  }, [aiNotice]);
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -143,21 +147,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="usage-meter" title={usage.remainingPercent === null ? "Codex allowance is unavailable" : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`} aria-label={usage.remainingPercent === null ? "Codex usage unavailable" : `${usage.remainingPercent}% usage remaining`}>
           <span>Usage remaining</span><div className="usage-track"><div style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div><strong>{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
         </div>
-        <button type="button" aria-label="Help" title="Help" aria-expanded={panel === "help"} onClick={() => setPanel(panel === "help" ? null : "help")}><CircleHelp size={20} /></button>
-        <button type="button" aria-label="Settings" title="Settings" aria-expanded={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}><Settings size={20} /></button>
         <button type="button" aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</button>
       </nav>
-      {panel && <div className="header-popover" role="region" aria-label={panel === "help" ? "Help" : "Settings"}>
-        {panel === "help" ? <><strong>How to use Tao</strong><p>Add topics and course resources to a subject, then choose Practice. Ask for a hint as you work; Shift+Enter sends a chat message.</p></> : <><strong>AI settings</strong>
-          <p>{status.available ? "Codex is running locally. Your CLI login is used when you study." : "Start the local-codex Docker profile and sign in to Codex."}</p>
-          {!status.available && aiNotice && <p className="settings-error">Codex must be connected before practicing or summarizing.</p>}
-          <p>Codex uses hosted models. Choose a model in the top bar.</p>
-          {usage.lifetimeTokens !== null && <p>Account token activity: {usage.lifetimeTokens.toLocaleString()} lifetime tokens.</p>}
-          {usage.resetsAt !== null && <p>Allowance resets {new Date(usage.resetsAt * 1000).toLocaleString()}.</p>}
-        </>}
-      </div>}
     </div></header>
-    {children}<UndoToast />
+    {children}{aiNotice && <div className="ai-notice" role="status">Codex is unavailable. Start its local Docker profile and sign in; see README for setup.</div>}<UndoToast />
   </div>;
 }
 

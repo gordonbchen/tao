@@ -135,7 +135,7 @@ function SubjectContent() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const resource = await api<Resource>(`/api/subjects/${id}/resources`, { method: "POST", body: form });
+      const resource = await api<Resource>(`/api/subjects/${id}/resources`, { method: "POST", headers: getAiRequestHeaders(), body: form });
       await refresh();
       if (resource.suggestedTopics?.length) setSuggestions({ resource, topics: resource.suggestedTopics });
       if (resource.extractionStatus !== "empty" && aiSettings.ready && aiSettings.configured) {
@@ -195,7 +195,7 @@ function SubjectContent() {
 
   async function generateTopicSummary(topicId: string) {
     if (!aiSettings.ready) return;
-    if (!aiSettings.configured) { notifyAiSetupRequired(); setTopicSummaryError("Configure Codex in Settings to create a topic summary."); return; }
+    if (!aiSettings.configured) { notifyAiSetupRequired(); setTopicSummaryError("Connect the local Codex sidecar to create a topic summary."); return; }
     setTopicSummaryLoading(true);
     setTopicSummaryError("");
     try {
@@ -205,7 +205,7 @@ function SubjectContent() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not create a topic summary";
       setTopicSummaryError(message);
-      if (/Configure Codex|Connect Codex|Codex is unavailable|Codex is not signed in/i.test(message)) notifyAiSetupRequired();
+      if (/Codex sidecar|Codex is unavailable|Codex is not signed in/i.test(message)) notifyAiSetupRequired();
       setTopicDetail((current) => current?.id === topicId ? { ...current, summaryStatus: "failed" } : current);
     } finally { setTopicSummaryLoading(false); }
   }
@@ -245,7 +245,7 @@ function SubjectContent() {
     if (!aiSettings.ready) return;
     if (!aiSettings.configured) {
       notifyAiSetupRequired();
-      setSummaryError("Configure an AI model in Settings to create a resource summary.");
+      setSummaryError("Connect the local Codex sidecar to create a resource summary.");
       return;
     }
     if (resourceSummariesInProgress.has(resourceId)) return;

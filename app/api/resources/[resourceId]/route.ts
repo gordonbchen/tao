@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const message = error instanceof Error ? error.message : "Could not summarize this resource";
     const noProvider = /codex is unavailable/i.test(message);
     await query(`UPDATE resources SET summary_status = $3 WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID, noProvider ? "not_generated" : "failed"]);
-    return jsonError(noProvider ? "Connect Codex in Settings to create a resource summary." : message, noProvider ? 503 : 502);
+    return jsonError(noProvider ? "Connect the local Codex sidecar to create a resource summary." : message, noProvider ? 503 : 502);
   }
 }
 
