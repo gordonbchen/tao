@@ -7,3 +7,5 @@ data/
 uploads/
 *.tsbuildinfo
 coverage/
+public/mathjax/
+public/mathjax-font/

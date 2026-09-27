@@ -73,7 +73,7 @@ async function jsonFromConfiguredProvider<T>(apiKey: string | undefined, system:
 export async function generateProblem(context: Context, apiKey?: string): Promise<GeneratedProblem> {
   if (!apiKey && !process.env.OLLAMA_BASE_URL && !process.env.AI_BASE_URL) return demoProblem(context);
   const { value: result, provider } = await jsonFromConfiguredProvider<Omit<GeneratedProblem, "provider">>(apiKey,
-    "Create one accurate educational problem strictly within the supplied course coverage. Return JSON with prompt, solution, hints (3 short incremental strings), sourceRefs (array of source labels). Never claim a topic is covered if the materials do not support it.",
+    "Create one accurate educational problem strictly within the supplied course coverage. Return JSON with prompt, solution, hints (3 short incremental strings), sourceRefs (array of source labels). Use \\(...\\) for inline TeX and \\[...\\] for display TeX. Never claim a topic is covered if the materials do not support it.",
     JSON.stringify(context));
   if (typeof result.prompt !== "string" || typeof result.solution !== "string" || !Array.isArray(result.hints)) throw new Error("AI response did not match the expected problem format");
   return { prompt: result.prompt, solution: result.solution, hints: result.hints.filter((x): x is string => typeof x === "string").slice(0, 3), sourceRefs: Array.isArray(result.sourceRefs) ? result.sourceRefs.filter((x): x is string => typeof x === "string") : [], provider };
@@ -82,7 +82,7 @@ export async function generateProblem(context: Context, apiKey?: string): Promis
 export async function checkAnswer(problem: { prompt: string; solution: string }, answer: string, apiKey?: string): Promise<{ feedback: string; correctness: Correctness }> {
   if (!apiKey && !process.env.OLLAMA_BASE_URL && !process.env.AI_BASE_URL) return { correctness: "uncertain", feedback: "Your attempt is saved. The local demo has no AI answer checker, so compare your reasoning with the solution when you are ready to reveal it." };
   const { value: result } = await jsonFromConfiguredProvider<{ feedback: string; correctness: Correctness }>(apiKey,
-    "Give careful educational feedback on a student's answer. Mathematical reasoning can be ambiguous: use uncertain when the available work is insufficient. Return JSON with feedback and correctness, one of correct, partial, incorrect, uncertain. Do not overstate certainty.",
+    "Give careful educational feedback on a student's answer. Mathematical reasoning can be ambiguous: use uncertain when the available work is insufficient. Return JSON with feedback and correctness, one of correct, partial, incorrect, uncertain. Use \\(...\\) for inline TeX and \\[...\\] for display TeX. Do not overstate certainty.",
     JSON.stringify({ problem: problem.prompt, referenceSolution: problem.solution, studentAnswer: answer }));
   const valid = ["correct", "partial", "incorrect", "uncertain"].includes(result.correctness);
   if (typeof result.feedback !== "string" || !valid) return { correctness: "uncertain", feedback: "I couldn't reliably assess this response. Compare it with the solution and use your judgment." };
@@ -92,7 +92,7 @@ export async function checkAnswer(problem: { prompt: string; solution: string },
 export async function suggestHint(problem: { prompt: string; solution: string }, studentMessage: string, previousHints: string[], apiKey?: string) {
   if (!apiKey && !process.env.OLLAMA_BASE_URL && !process.env.AI_BASE_URL) return undefined;
   const { value } = await jsonFromConfiguredProvider<{ hint: string }>(apiKey,
-    "Act as a patient tutor. Give one small, incremental hint that responds to where the student is stuck. Do not reveal the answer or full solution. Return JSON with a single hint string.",
+    "Act as a patient tutor. Give one small, incremental hint that responds to where the student is stuck. Do not reveal the answer or full solution. Return JSON with a single hint string. Use \\(...\\) for inline TeX and \\[...\\] for display TeX.",
     JSON.stringify({ problem: problem.prompt, solution: problem.solution, earlierHints: previousHints, studentMessage }));
   return typeof value.hint === "string" ? value.hint.slice(0, 1200) : undefined;
 }

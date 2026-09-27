@@ -10,7 +10,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   if (name !== undefined && (!name || name.length > 160)) return jsonError("Topic name must be 1–160 characters");
   if (body.coverageConfirmed !== undefined && typeof body.coverageConfirmed !== "boolean") return jsonError("coverageConfirmed must be a boolean");
-  const result = await query(`UPDATE topics t SET name = coalesce($2, name), coverage_confirmed = coalesce($3, coverage_confirmed)
+  const result = await query(`UPDATE topics t SET name = coalesce($2, t.name), coverage_confirmed = coalesce($3, t.coverage_confirmed)
     FROM subjects s WHERE t.subject_id = s.id AND s.owner_id = $4 AND t.id = $1
     RETURNING t.id, t.name, t.coverage_confirmed AS "coverageConfirmed"`, [topicId, name ?? null, body.coverageConfirmed ?? null, LOCAL_OWNER_ID]);
   return result.rows[0] ? Response.json(result.rows[0]) : jsonError("Topic not found", 404);

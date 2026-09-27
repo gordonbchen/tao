@@ -32,7 +32,7 @@ export default function SubjectPage() {
       setTopics((detail.topics ?? []).filter((topic) => !isPendingRemoval(topic.id)));
       setResources((detail.resources ?? []).filter((resource) => !isPendingRemoval(resource.id)));
       setSelectedTopic((current) => current && detail.topics.some((topic) => topic.id === current && !isPendingRemoval(topic.id)) ? current : "");
-      document.title = detail.subject.name;
+      document.title = `Tao - ${detail.subject.name}`;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load subject");
     } finally {
@@ -145,7 +145,7 @@ export default function SubjectPage() {
       <section className="simple-section">
         <div className="section-title-row"><h2>Topics</h2><form className="simple-add topic-add" onSubmit={addTopic}><input aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><button className="button" disabled={!topicName.trim() || busy} aria-label="Add topic"><Plus size={18} /></button></form></div>
         {topics.length > 0 && <ul className="simple-list">{topics.map((topic) => <li key={topic.id}>
-          {editingTopic === topic.id ? <form className="topic-edit" onSubmit={(event) => { event.preventDefault(); void saveTopic(topic); }}><input aria-label="Topic name" autoFocus maxLength={160} value={editedName} onChange={(event) => setEditedName(event.target.value)} /><button className="icon-action" aria-label="Save topic name"><Check size={18} /></button><button type="button" className="icon-action" aria-label="Cancel editing" onClick={() => setEditingTopic(null)}><X size={18} /></button></form> : <><span>{topic.name}</span><button className="icon-action" aria-label={`Edit ${topic.name}`} title="Edit topic" onClick={() => { setEditingTopic(topic.id); setEditedName(topic.name); }}><Pencil size={16} /></button><button className="icon-action" aria-label={`Remove ${topic.name}`} title="Remove topic" onClick={() => removeTopic(topic)}><Trash2 size={18} /></button></>}
+          {editingTopic === topic.id ? <form className="topic-edit" onSubmit={(event) => { event.preventDefault(); void saveTopic(topic); }}><input aria-label="Topic name" autoFocus maxLength={160} value={editedName} onChange={(event) => setEditedName(event.target.value)} /><button type="submit" className="icon-action" aria-label="Save topic name"><Check size={18} /></button><button type="button" className="icon-action" aria-label="Cancel editing" onClick={() => setEditingTopic(null)}><X size={18} /></button></form> : <><span>{topic.name}</span><button className="icon-action" aria-label={`Edit ${topic.name}`} title="Edit topic" onClick={() => { setEditingTopic(topic.id); setEditedName(topic.name); }}><Pencil size={16} /></button><button className="icon-action" aria-label={`Remove ${topic.name}`} title="Remove topic" onClick={() => removeTopic(topic)}><Trash2 size={18} /></button></>}
         </li>)}</ul>}
         {topics.length === 0 && <p className="quiet-empty">Add a topic to start practicing.</p>}
       </section>

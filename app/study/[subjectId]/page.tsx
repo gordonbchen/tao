@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleHelp, Send, ThumbsUp, TriangleAlert } from "lucide-react";
 import { api, AppShell, LoadingCard, Subject } from "../../components";
+import { MathText } from "../../math-text";
 
 type Topic = { id: string; name: string };
 type Problem = { id: string; topicId: string; prompt: string; difficulty: string };
@@ -59,7 +60,7 @@ export default function StudyPage() {
     setTopicId(requestedTopic);
     api<{ subject: Subject; topics: Topic[] }>(`/api/subjects/${subjectId}`).then(async data => {
       setSubject(data.subject);
-      document.title = data.subject.name;
+      document.title = `Tao - ${data.subject.name}`;
       setTopics(data.topics ?? []);
       if (!data.topics?.length) { setError("Add a topic before practicing."); setGenerating(false); return; }
       await generate(requestedTopic);
@@ -100,13 +101,13 @@ export default function StudyPage() {
         </>}</div> : <div className="study-layout">
           <div className="problem-column">
             <AIKeySettings apiKey={apiKey} onChange={setApiKey} show={showApiKey} onToggle={() => setShowApiKey(v => !v)} />
-            <section className="card problem-card"><div className="problem-meta"><span className="topic-chip">{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</span><span className="difficulty-chip">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</span></div><div className="problem-prompt">{problem.prompt}</div></section>
+            <section className="card problem-card"><div className="problem-meta"><span className="topic-chip">{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</span><span className="difficulty-chip">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</span></div><MathText className="problem-prompt" text={problem.prompt} /></section>
             {!feedback ? <form className="card answer-panel" onSubmit={submitAttempt}><textarea className="answer-box" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
               <div className="rating-label">Difficulty</div><div className="rating-row">{ratings.map(option => <button type="button" key={option.value} className={`rating-option ${rating === option.value ? "active" : ""}`} onClick={() => setRating(option.value)}>{option.label}</button>)}</div>
               <div className="answer-actions"><button className="button button-primary" disabled={!answer.trim() || working}>{working ? <><span className="spinner" />Checking…</> : <>Check answer <ArrowRight size={13} /></>}</button></div>{error && <div className="error-message">{error}</div>}
-            </form> : <section className={`feedback-card ${feedback.correctness}`}><div className="feedback-title"><FeedbackIcon size={15} />{correctnessLabel}</div><p className="feedback-copy">{feedback.feedback}</p>{feedback.solution && <button className="solution-toggle" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide worked solution" : "Show worked solution"}</button>}{showSolution && feedback.solution && <div className="math-block" style={{ whiteSpace: "pre-wrap" }}>{feedback.solution}</div>}<div className="next-problem"><button className="button button-primary button-small" onClick={() => generate()} disabled={working}>{working ? <span className="spinner" /> : <>Try another problem <ArrowRight size={12} /></>}</button></div></section>}
+            </form> : <section className={`feedback-card ${feedback.correctness}`}><div className="feedback-title"><FeedbackIcon size={15} />{correctnessLabel}</div><MathText className="feedback-copy" text={feedback.feedback} />{feedback.solution && <button className="solution-toggle" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide worked solution" : "Show worked solution"}</button>}{showSolution && feedback.solution && <MathText className="math-block" text={feedback.solution} />}<div className="next-problem"><button className="button button-primary button-small" onClick={() => generate()} disabled={working}>{working ? <span className="spinner" /> : <>Try another problem <ArrowRight size={12} /></>}</button></div></section>}
           </div>
-          <aside className="card chat-card"><div className="chat-head"><strong>Ask for a hint</strong></div><div className="chat-messages">{messages.map((message, i) => <div key={i} className={`chat-msg ${message.role}`}>{message.text}</div>)}{chatBusy && <div className="chat-msg assistant"><span className="spinner" />Thinking…</div>}</div><div className="chat-suggestions"><button className="suggestion" onClick={() => askTutor(undefined, "Can I get a small hint?")} disabled={chatBusy}>Hint</button></div><form className="chat-input-wrap" onSubmit={askTutor}><textarea className="chat-input" rows={2} value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} placeholder="Where are you stuck?" /><button className="send-button" aria-label="Send message" disabled={!chatText.trim() || chatBusy}><Send size={17} /></button></form></aside>
+          <aside className="card chat-card"><div className="chat-head"><strong>Ask for a hint</strong></div><div className="chat-messages">{messages.map((message, i) => <MathText key={i} className={`chat-msg ${message.role}`} text={message.text} />)}{chatBusy && <div className="chat-msg assistant"><span className="spinner" />Thinking…</div>}</div><div className="chat-suggestions"><button className="suggestion" onClick={() => askTutor(undefined, "Can I get a small hint?")} disabled={chatBusy}>Hint</button></div><form className="chat-input-wrap" onSubmit={askTutor}><textarea className="chat-input" rows={2} value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} placeholder="Where are you stuck?" /><button className="send-button" aria-label="Send message" disabled={!chatText.trim() || chatBusy}><Send size={17} /></button></form></aside>
         </div>}
       </>}
     </div>

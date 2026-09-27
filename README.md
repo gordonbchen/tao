@@ -3,6 +3,7 @@
 Tao is a local-first study app for course-aware practice. Add subjects and covered topics, upload notes, and practice problems selected by topic review state.
 
 The interface keeps the overview to a subject list and new-subject action. Each subject shows its topics, resources, and practice action. Text is set in the bundled Libertinus Serif font.
+The study screen renders TeX notation with locally hosted MathJax. Use `\\(...\\)` for inline math and `\\[...\\]` for display math. The header provides help, settings, a saved dark mode toggle, and a shared local profile; sign-in is not implemented yet.
 
 This prototype has one shared local demo workspace and no sign-in. Run it only on a machine or network you trust; account separation is a future milestone. Uploaded files and study data remain in local Docker volumes.
 

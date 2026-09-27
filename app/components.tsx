@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import Image from "next/image";
+import { CircleHelp, Moon, Settings, Sun, UserRound } from "lucide-react";
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
@@ -73,7 +76,33 @@ function UndoToast() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  return <div className="app-frame">{children}<UndoToast /></div>;
+  const [theme, setTheme] = useState("light");
+  const [panel, setPanel] = useState<"help" | "settings" | "profile" | null>(null);
+  useEffect(() => {
+    const saved = localStorage.getItem("tao-theme");
+    if (saved === "dark") { setTheme("dark"); document.documentElement.dataset.theme = "dark"; }
+  }, []);
+  function toggleTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("tao-theme", next);
+  }
+  return <div className="app-frame">
+    <header className="site-header"><div className="site-header-inner">
+      <Link className="site-brand" href="/"><Image src="/icon.svg" alt="" width={30} height={30} /><span>Tao</span></Link>
+      <nav className="header-actions" aria-label="Site controls">
+        <button type="button" aria-label="Help" title="Help" aria-expanded={panel === "help"} onClick={() => setPanel(panel === "help" ? null : "help")}><CircleHelp size={20} /></button>
+        <button type="button" aria-label="Settings" title="Settings" aria-expanded={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}><Settings size={20} /></button>
+        <button type="button" aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</button>
+        <button type="button" className="profile-control" aria-label="Profile" aria-expanded={panel === "profile"} onClick={() => setPanel(panel === "profile" ? null : "profile")}><UserRound size={20} /><span>Local profile</span></button>
+      </nav>
+      {panel && <div className="header-popover" role="region" aria-label={panel === "help" ? "Help" : panel === "settings" ? "Settings" : "Profile"}>
+        {panel === "help" ? <><strong>How to use Tao</strong><p>Add topics and course resources to a subject, then choose Practice. Ask for a hint as you work; Shift+Enter sends a chat message.</p></> : panel === "settings" ? <><strong>Settings</strong><button className="popover-action" onClick={toggleTheme}>{theme === "dark" ? "Use light mode" : "Use dark mode"}</button><p>AI provider settings are on the practice page.</p></> : <><strong>Local profile</strong><p>This local prototype uses one shared profile. Sign-in is planned before public access.</p></>}
+      </div>}
+    </div></header>
+    {children}<UndoToast />
+  </div>;
 }
 
 export function LoadingCard() { return <div className="loading-card"><span className="spinner" />Loading your learning space…</div>; }
