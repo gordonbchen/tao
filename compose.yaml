@@ -26,6 +26,7 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
       AI_PROVIDER: ${AI_PROVIDER:-}
+      CODEX_MODEL: ${CODEX_MODEL:-}
     env_file:
       - path: .env
         required: false

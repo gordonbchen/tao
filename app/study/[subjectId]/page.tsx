@@ -13,8 +13,8 @@ type Message = { role: "assistant" | "user"; text: string };
 type Feedback = { feedback: string; correctness: "correct" | "partial" | "incorrect" | "uncertain"; solution?: string };
 const ratings = [{ value: "easy", label: "Easy" }, { value: "okay", label: "Okay" }, { value: "hard", label: "Hard" }, { value: "could_not_solve", label: "Couldn’t solve" }];
 
-function AIKeySettings({ apiKey, onChange, show, onToggle }: { apiKey: string; onChange: (value: string) => void; show: boolean; onToggle: () => void }) {
-  return <details className="api-key-details"><summary>AI settings <span>{apiKey.trim() ? "OpenAI key entered" : "Local AI or demo mode"}</span></summary><div className="api-key-row"><label htmlFor="openai-key">OpenAI API key <span>Optional</span></label><div className="api-key-input"><input id="openai-key" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={apiKey} onChange={e => onChange(e.target.value)} placeholder="sk-…" /><button type="button" onClick={onToggle}>{show ? "Hide" : "Show"}</button></div><p>Held in page memory only. Sent to this app when you request AI help and not saved in this browser. Leave it blank to use configured local AI or demo mode.</p></div></details>;
+function AIKeySettings({ apiKey, providerLabel, onChange, show, onToggle }: { apiKey: string; providerLabel: string; onChange: (value: string) => void; show: boolean; onToggle: () => void }) {
+  return <details className="api-key-details"><summary>AI settings <span>{apiKey.trim() ? "OpenAI key entered" : providerLabel}</span></summary><div className="api-key-row"><label htmlFor="openai-key">OpenAI API key <span>Optional</span></label><div className="api-key-input"><input id="openai-key" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={apiKey} onChange={e => onChange(e.target.value)} placeholder="sk-…" /><button type="button" onClick={onToggle}>{show ? "Hide" : "Show"}</button></div><p>Held in page memory only. Sent to this app when you request AI help and not saved in this browser. Leave it blank to use the configured provider.</p></div></details>;
 }
 
 export default function StudyPage() {
@@ -24,6 +24,7 @@ export default function StudyPage() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [topicId, setTopicId] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [providerLabel, setProviderLabel] = useState("Checking provider…");
   const [showApiKey, setShowApiKey] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [answer, setAnswer] = useState("");
@@ -54,6 +55,7 @@ export default function StudyPage() {
 
   // The ref prevents React Strict Mode from generating a duplicate first problem.
   useEffect(() => {
+    api<{ label: string }>("/api/ai/status").then((status) => setProviderLabel(status.label)).catch(() => setProviderLabel("Provider unavailable"));
     if (autoStarted.current) return;
     autoStarted.current = true;
     const requestedTopic = new URLSearchParams(window.location.search).get("topic") ?? "";
@@ -95,12 +97,12 @@ export default function StudyPage() {
       {loading ? <LoadingCard /> : <>
         {!problem ? <div className="empty-state">{generating ? <p><span className="spinner" /> Making a problem…</p> : <>
           {error && <div className="error-message">{error}</div>}
-          <AIKeySettings apiKey={apiKey} onChange={setApiKey} show={showApiKey} onToggle={() => setShowApiKey(v => !v)} />
+          <AIKeySettings apiKey={apiKey} providerLabel={providerLabel} onChange={setApiKey} show={showApiKey} onToggle={() => setShowApiKey(v => !v)} />
           {topics.length > 0 && <button className="button button-primary" onClick={() => generate()} disabled={working}>{working ? <><span className="spinner" />Making a problem…</> : "Try again"}</button>}
           <p><Link className="back-link" href={`/subjects/${subjectId}`}><ArrowLeft size={18} />Back to subject</Link></p>
         </>}</div> : <div className="study-layout">
           <div className="problem-column">
-            <AIKeySettings apiKey={apiKey} onChange={setApiKey} show={showApiKey} onToggle={() => setShowApiKey(v => !v)} />
+            <AIKeySettings apiKey={apiKey} providerLabel={providerLabel} onChange={setApiKey} show={showApiKey} onToggle={() => setShowApiKey(v => !v)} />
             <section className="card problem-card"><div className="problem-meta"><span className="topic-chip">{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</span><span className="difficulty-chip">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</span></div><MathText className="problem-prompt" text={problem.prompt} /></section>
             {!feedback ? <form className="card answer-panel" onSubmit={submitAttempt}><textarea className="answer-box" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
               <div className="rating-label">Difficulty</div><div className="rating-row">{ratings.map(option => <button type="button" key={option.value} className={`rating-option ${rating === option.value ? "active" : ""}`} onClick={() => setRating(option.value)}>{option.label}</button>)}</div>

@@ -42,7 +42,7 @@ mkdir -p .codex-tao
 CODEX_HOME="$PWD/.codex-tao" codex login
 ```
 
-Copy `.env.example` to `.env` and set `AI_PROVIDER=codex`. Then run `docker compose --profile local-codex up --build -d`. Leave the OpenAI key field blank in Tao to use Codex. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. `CODEX_MODEL` is optional. A key entered on the practice page takes precedence over Codex.
+Copy `.env.example` to `.env` and set `AI_PROVIDER=codex` and, for a lighter model, `CODEX_MODEL=gpt-6-luna`. Set `COMPOSE_PROFILES=local-codex` if you want ordinary `docker compose up --build -d` to start the Codex sidecar automatically; otherwise use `docker compose --profile local-codex up --build -d`. Leave the OpenAI key field blank in Tao to use Codex. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. A key entered on the practice page takes precedence over Codex. The practice screen shows the active provider and model under AI settings.
 
 Uploaded text is stored with each resource. Topic suggestions are extracted from headings and the filename; no AI analyzes uploads yet. Topics store names and review state, not a separate summary. For a new problem, the AI receives the subject, topic, selected difficulty, and up to three resource excerpts of 3,500 characters each, taken near the topic name when found. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
 
@@ -66,3 +66,4 @@ npm test
 ```
 
 See [AGENTS.md](AGENTS.md) for the product plan and development conventions. Production VPS deployment is planned but has not been configured yet.
+The proposed per-resource and per-topic summaries are described in [docs/content-model.md](docs/content-model.md); they are not implemented yet.

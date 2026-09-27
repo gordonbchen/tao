@@ -55,6 +55,13 @@ export default function SubjectPage() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!resourceText) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setResourceText(null); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [resourceText]);
+
   async function addTopic(event: React.FormEvent) {
     event.preventDefault();
     const name = topicName.trim();
