@@ -1,3 +1,4 @@
+import { AI_PROVIDERS } from "@/lib/ai";
 import { request as httpRequest } from "node:http";
 
 type CodexUsage = { usedPercent: number | null; windowDurationMins: number | null; resetsAt: number | null; lifetimeTokens: number | null };
@@ -27,8 +28,10 @@ function readCodexUsage(): Promise<CodexUsage> {
   });
 }
 
-export async function GET() {
+// Only Codex exposes account allowance; Claude CLI usage is reported as unavailable.
+export async function GET(request: Request) {
   try {
+    if (!AI_PROVIDERS.codex.models.includes(new URL(request.url).searchParams.get("model") ?? "")) throw new Error("Usage unavailable");
     const usage = await readCodexUsage();
     const remainingPercent = usage.usedPercent === null ? null : 100 - usage.usedPercent;
     return Response.json({ ...usage, remainingPercent });

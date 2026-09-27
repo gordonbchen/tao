@@ -7,7 +7,7 @@ function distributedExtract(text: string) {
   return positions.map((start, index) => `Excerpt ${index + 1}:\n${text.slice(start, start + width)}`).join("\n\n");
 }
 
-export async function suggestTopicsWithCodex(filename: string, extractedText: string, existingTopics: string[], options: AiOptions = {}) {
+export async function suggestTopicsWithAi(filename: string, extractedText: string, existingTopics: string[], options: AiOptions = {}) {
   const { value } = await generateStructuredText(
     "topic_suggestions",
     "Identify specific study topics actually taught in this course resource. Infer them from the definitions, theorems, examples, and worked material, not only from headings. Suggest 3 to 12 concise topic names at the granularity a student would practice separately. Exclude generic labels such as 'Definitions', 'Chapter 1', and the document title unless it names a real concept. Do not add topics that the excerpts do not support. If an existing topic name describes the same material, use that name so the student can link this resource to it. Return JSON with a topics array of strings only.",
@@ -15,7 +15,7 @@ export async function suggestTopicsWithCodex(filename: string, extractedText: st
     options,
   );
   const raw = value && typeof value === "object" && "topics" in value ? (value as { topics: unknown }).topics : null;
-  if (!Array.isArray(raw)) throw new Error("Codex returned invalid topic suggestions");
+  if (!Array.isArray(raw)) throw new Error("AI returned invalid topic suggestions");
   const names = raw.filter((name): name is string => typeof name === "string")
     .map((name) => name.replace(/\s+/g, " ").trim())
     .filter((name) => name.length > 1 && name.length <= 160);

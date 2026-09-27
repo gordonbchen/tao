@@ -22,6 +22,6 @@ Tao stores an uploaded file, its extracted text, and a model summary on the reso
 
 ## Provider behavior
 
-The database and files remain local. Codex CLI runs locally but sends selected text to a hosted model through the user's login. AI summaries are suggestions, not proof that material was covered or that a mathematical claim is correct.
+The database and files remain local. Codex CLI and Claude Code CLI run locally but send selected text to hosted models through the user's login. AI summaries are suggestions, not proof that material was covered or that a mathematical claim is correct.
 
 Implement these records and screens incrementally. Do not add a separate search service or vector database unless real documents show that simpler passage matching fails.

@@ -1,7 +1,7 @@
 export type Difficulty = "easy" | "okay" | "hard";
 export type Rating = Difficulty | "could_not_solve";
 export type Correctness = "correct" | "partial" | "incorrect" | "uncertain";
-export type AiProvider = "codex";
+export type AiProvider = "codex" | "claude";
 export type AiOptions = { model?: string };
 
 export function aiOptionsFromRequest(request: Request): AiOptions {
@@ -28,41 +28,61 @@ type Context = {
   coverageSummary?: string;
 };
 
-const CODEX_MODELS = new Set(["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"]);
+export const AI_PROVIDERS = {
+  codex: { label: "Codex", socket: "/run/tao-codex/socket", profile: "local-codex", models: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"], defaultModel: process.env.CODEX_MODEL },
+  claude: { label: "Claude", socket: "/run/tao-claude/socket", profile: "local-claude", models: ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5"], defaultModel: process.env.CLAUDE_MODEL },
+} satisfies Record<AiProvider, { label: string; socket: string; profile: string; models: string[]; defaultModel?: string }>;
 
-function selectedModel(requested?: string) {
-  const fallback = process.env.CODEX_MODEL || "gpt-6-luna";
-  return requested && CODEX_MODELS.has(requested) ? requested : fallback;
+function connectedProviders() {
+  return (Object.keys(AI_PROVIDERS) as AiProvider[]).filter(provider => existsSync(AI_PROVIDERS[provider].socket));
 }
 
-async function codexJson<T>(kind: string, model: string, system: string, input: string): Promise<T> {
+function unavailableMessage(provider: AiProvider) {
+  const { label, profile } = AI_PROVIDERS[provider];
+  return `${label} is unavailable. Start the ${profile} Docker profile and sign in to ${label}.`;
+}
+
+function selectedModel(requested?: string): { provider: AiProvider; model: string } {
+  const requestedProvider = (Object.keys(AI_PROVIDERS) as AiProvider[]).find(provider => requested && AI_PROVIDERS[provider].models.includes(requested));
+  if (requestedProvider) return { provider: requestedProvider, model: requested! };
+  const provider = connectedProviders()[0] ?? "codex";
+  const { models, defaultModel } = AI_PROVIDERS[provider];
+  return { provider, model: defaultModel && models.includes(defaultModel) ? defaultModel : models[0] };
+}
+
+async function bridgeJson<T>(provider: AiProvider, kind: string, model: string, system: string, input: string): Promise<T> {
+  const { label, socket } = AI_PROVIDERS[provider];
   return new Promise((resolve, reject) => {
-    const request = httpRequest({ socketPath: "/run/tao-codex/socket", path: "/infer", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 190_000 }, response => {
+    const request = httpRequest({ socketPath: socket, path: "/infer", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 190_000 }, response => {
       let body = "";
       response.setEncoding("utf8");
-      response.on("data", chunk => { body += chunk; if (body.length > 64_000) request.destroy(new Error("Codex response too large")); });
+      response.on("data", chunk => { body += chunk; if (body.length > 64_000) request.destroy(new Error(`${label} response too large`)); });
       response.on("end", () => {
         try {
           const parsed = JSON.parse(body);
-          if (response.statusCode !== 200) return reject(new Error(parsed.error || "Codex request failed"));
+          if (response.statusCode !== 200) return reject(new Error(parsed.error || `${label} request failed`));
           resolve(parsed as T);
-        } catch { reject(new Error("Codex returned invalid JSON")); }
+        } catch { reject(new Error(`${label} returned invalid JSON`)); }
       });
     });
-    request.on("timeout", () => request.destroy(new Error("Codex request timed out")));
-    request.on("error", () => reject(new Error("Codex is unavailable. Start the local-codex Docker profile and sign in to Codex.")));
+    request.on("timeout", () => request.destroy(new Error(`${label} request timed out`)));
+    request.on("error", () => reject(new Error(unavailableMessage(provider))));
     request.end(JSON.stringify({ kind, system, input, model }));
   });
 }
 
+export function defaultAiModel() {
+  return selectedModel().model;
+}
+
 export function hasAiProvider() {
-  return existsSync("/run/tao-codex/socket");
+  return connectedProviders().length > 0;
 }
 
 async function jsonFromConfiguredProvider<T>(system: string, input: string, kind: string, options: AiOptions = {}): Promise<{ value: T; provider: AiProvider; model: string }> {
-  if (!hasAiProvider()) throw new Error("Codex is unavailable. Start the local-codex Docker profile and sign in to Codex.");
-  const model = selectedModel(options.model);
-  return { value: await codexJson<T>(kind, model, system, input), provider: "codex", model };
+  const { provider, model } = selectedModel(options.model);
+  if (!existsSync(AI_PROVIDERS[provider].socket)) throw new Error(unavailableMessage(provider));
+  return { value: await bridgeJson<T>(provider, kind, model, system, input), provider, model };
 }
 
 export async function generateProblem(context: Context, options: AiOptions = {}): Promise<GeneratedProblem> {

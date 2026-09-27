@@ -7,7 +7,7 @@ import { Moon, Sun } from "lucide-react";
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
-type AIStatus = { available: boolean; models: string[]; defaultModel: string };
+type AIStatus = { available: boolean; models: { id: string; provider: string }[]; defaultModel: string };
 type AIUsage = { usedPercent: number | null; remainingPercent: number | null; windowDurationMins: number | null; resetsAt: number | null; lifetimeTokens: number | null };
 type AISettingsValue = { model: string; configured: boolean; ready: boolean; usage: AIUsage };
 const emptyUsage: AIUsage = { usedPercent: null, remainingPercent: null, windowDurationMins: null, resetsAt: null, lifetimeTokens: null };
@@ -104,7 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [aiNotice, setAiNotice] = useState(false);
   useEffect(() => {
     const refreshUsage = () => {
-      void fetch("/api/ai/usage").then(r => r.json()).then((result: AIUsage) => {
+      void fetch(`/api/ai/usage?model=${encodeURIComponent(requestModel)}`).then(r => r.json()).then((result: AIUsage) => {
         setUsage(result);
         updateAISettings({ usage: result });
       }).catch(() => undefined);
@@ -114,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     void fetch("/api/ai/status").then(r => r.json()).then((data: AIStatus) => {
       setStatus(data);
       const storedModel = localStorage.getItem("tao-ai-model");
-      const nextModel = storedModel && data.models.includes(storedModel) ? storedModel : data.defaultModel;
+      const nextModel = storedModel && data.models.some(option => option.id === storedModel) ? storedModel : data.defaultModel;
       setModelState(nextModel);
       requestModel = nextModel;
       updateAISettings({ model: nextModel, configured: data.available, ready: true });
@@ -124,10 +124,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
     const onSetupRequired = () => setAiNotice(true);
     window.addEventListener("tao:ai-setup-required", onSetupRequired);
+    window.addEventListener("tao:ai-model-changed", refreshUsage);
     const usageTimer = window.setInterval(refreshUsage, 60_000);
-    return () => { window.removeEventListener("tao:ai-setup-required", onSetupRequired); window.clearInterval(usageTimer); };
+    return () => { window.removeEventListener("tao:ai-setup-required", onSetupRequired); window.removeEventListener("tao:ai-model-changed", refreshUsage); window.clearInterval(usageTimer); };
   }, []);
-  function setModel(next: string) { updateModel(next); setModelState(next); }
+  function setModel(next: string) { updateModel(next); setModelState(next); window.dispatchEvent(new Event("tao:ai-model-changed")); }
+  const provider = status.models.find(option => option.id === model)?.provider ?? "AI";
   useEffect(() => {
     if (!aiNotice) return;
     const timer = window.setTimeout(() => setAiNotice(false), 8000);
@@ -143,14 +145,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <header className="site-header"><div className="site-header-inner">
       <Link className="site-brand" href="/"><Image src="/icon.svg" alt="" width={30} height={30} /><span>Tao</span></Link>
       <nav className="header-actions" aria-label="Site controls">
-        <label className="model-control" title="Select Codex model"><span>Codex</span><select aria-label="Codex model" disabled={!status.available} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option} value={option}>{option}</option>)}</select></label>
-        <div className="usage-meter" title={usage.remainingPercent === null ? "Codex allowance is unavailable" : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`} aria-label={usage.remainingPercent === null ? "Codex usage unavailable" : `${usage.remainingPercent}% usage remaining`}>
+        <label className="model-control" title={`Select ${provider} model`}><span>{provider}</span><select aria-label="AI model" disabled={!status.available} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.id}</option>)}</select></label>
+        <div className="usage-meter" title={usage.remainingPercent === null ? `${provider} allowance is unavailable` : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
           <span>Usage remaining</span><div className="usage-track"><div style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div><strong>{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
         </div>
         <button type="button" aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</button>
       </nav>
     </div></header>
-    {children}{aiNotice && <div className="ai-notice" role="status">Codex is unavailable. Start its local Docker profile and sign in; see README for setup.</div>}<UndoToast />
+    {children}{aiNotice && <div className="ai-notice" role="status">No AI sidecar is available. Start the Codex or Claude Docker profile and sign in; see README for setup.</div>}<UndoToast />
   </div>;
 }
 

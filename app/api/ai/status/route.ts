@@ -1,10 +1,9 @@
 import { request as httpRequest } from "node:http";
+import { AI_PROVIDERS, defaultAiModel, type AiProvider } from "@/lib/ai";
 
-const models = ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"];
-
-function codexAvailable(): Promise<boolean> {
+function bridgeAvailable(socketPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const request = httpRequest({ socketPath: "/run/tao-codex/socket", path: "/health", method: "GET", timeout: 1500 }, response => {
+    const request = httpRequest({ socketPath, path: "/health", method: "GET", timeout: 1500 }, response => {
       response.resume();
       resolve(response.statusCode === 200);
     });
@@ -15,5 +14,9 @@ function codexAvailable(): Promise<boolean> {
 }
 
 export async function GET() {
-  return Response.json({ available: await codexAvailable(), models, defaultModel: process.env.CODEX_MODEL || models[0] });
+  const providers = Object.keys(AI_PROVIDERS) as AiProvider[];
+  const available = await Promise.all(providers.map(provider => bridgeAvailable(AI_PROVIDERS[provider].socket)));
+  const models = providers.filter((_, index) => available[index])
+    .flatMap(provider => AI_PROVIDERS[provider].models.map(id => ({ id, provider: AI_PROVIDERS[provider].label })));
+  return Response.json({ available: models.length > 0, models, defaultModel: defaultAiModel() });
 }

@@ -6,3 +6,5 @@ data
 uploads
 public/mathjax
 public/mathjax-font
+.codex-tao
+.claude-tao

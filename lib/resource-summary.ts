@@ -1,4 +1,4 @@
-import { generateStructuredText, type AiOptions } from "@/lib/ai";
+import { generateStructuredText, type AiOptions, type AiProvider } from "@/lib/ai";
 
 function splitText(text: string, maxChars = 18_000) {
   const chunks: string[] = [];
@@ -18,7 +18,7 @@ function splitText(text: string, maxChars = 18_000) {
 export async function summarizeResource(filename: string, extractedText: string, options?: AiOptions) {
   const chunks = splitText(extractedText);
   const summaries: string[] = [];
-  let provider: "codex" | undefined;
+  let provider: AiProvider | undefined;
   let model: string | undefined;
   for (let start = 0; start < chunks.length; start += 2) {
     const batch = chunks.slice(start, start + 2);

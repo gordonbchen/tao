@@ -24,6 +24,7 @@ services:
       DATABASE_URL: postgres://tao:tao_local_only@127.0.0.1:5432/tao
       UPLOAD_DIR: /app/uploads
       CODEX_MODEL: ${CODEX_MODEL:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
     env_file:
       - path: .env
         required: false
@@ -36,6 +37,7 @@ services:
       - next_build:/app/.next
       - uploads:/app/uploads
       - codex_socket:/run/tao-codex
+      - claude_socket:/run/tao-claude
     depends_on:
       db:
         condition: service_healthy
@@ -54,8 +56,23 @@ services:
       - ${CODEX_AUTH_DIR:-./.codex-tao}:/codex-auth
       - codex_socket:/run/tao-codex
 
+  claude:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+      network: host
+    network_mode: host
+    profiles: ["local-claude"]
+    environment:
+      CLAUDE_CONFIG_DIR: /claude-auth
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+    volumes:
+      - ${CLAUDE_AUTH_DIR:-./.claude-tao}:/claude-auth
+      - claude_socket:/run/tao-claude
+
 volumes:
   postgres_data:
   next_build:
   uploads:
   codex_socket:
+  claude_socket:

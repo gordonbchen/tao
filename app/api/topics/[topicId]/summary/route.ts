@@ -26,8 +26,8 @@ export async function POST(request: Request, { params }: RouteContext) {
     return Response.json(saved.rows[0]);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not summarize this topic";
-    const noProvider = /no ai provider configured|codex is unavailable|codex is not signed in/i.test(message);
+    const noProvider = /(codex|claude) is (unavailable|not signed in)/i.test(message);
     await query("UPDATE topics SET summary_status = $2 WHERE id = $1", [topicId, noProvider ? "not_generated" : "failed"]);
-    return jsonError(noProvider ? "Connect the local Codex sidecar to create a topic summary." : message, noProvider ? 503 : 502);
+    return jsonError(noProvider ? "Connect a local Codex or Claude sidecar to create a topic summary." : message, noProvider ? 503 : 502);
   }
 }

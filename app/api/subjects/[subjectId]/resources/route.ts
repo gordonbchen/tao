@@ -5,7 +5,7 @@ import { LOCAL_OWNER_ID, isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
 import { suggestTopics } from "@/lib/topic-suggestions";
 import { aiOptionsFromRequest, hasAiProvider } from "@/lib/ai";
-import { suggestTopicsWithCodex } from "@/lib/ai-topic-suggestions";
+import { suggestTopicsWithAi } from "@/lib/ai-topic-suggestions";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ subjectId: string }> };
@@ -55,9 +55,9 @@ export async function POST(request: Request, { params }: RouteContext) {
     if (extractedText.trim() && hasAiProvider()) {
       try {
         const existing = await query<{ name: string }>("SELECT name FROM topics WHERE subject_id = $1 ORDER BY created_at", [subjectId]);
-        const fromCodex = await suggestTopicsWithCodex(uploaded.name, extractedText, existing.rows.map((row) => row.name), aiOptionsFromRequest(request));
-        if (fromCodex.length) suggestedTopics = fromCodex;
-      } catch { /* Keep the quick heading fallback when Codex cannot suggest topics. */ }
+        const fromAi = await suggestTopicsWithAi(uploaded.name, extractedText, existing.rows.map((row) => row.name), aiOptionsFromRequest(request));
+        if (fromAi.length) suggestedTopics = fromAi;
+      } catch { /* Keep the quick heading fallback when AI cannot suggest topics. */ }
     }
     return Response.json({ ...result.rows[0], suggestedTopics, scannedPdfNotice: pdf && !extractedText.trim() ? "No selectable text was found. This may be a scanned document; OCR is not available yet." : undefined }, { status: 201 });
   } catch (error) {
