@@ -23,9 +23,6 @@ services:
     environment:
       DATABASE_URL: postgres://tao:tao_local_only@127.0.0.1:5432/tao
       UPLOAD_DIR: /app/uploads
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
-      AI_PROVIDER: ${AI_PROVIDER:-}
       CODEX_MODEL: ${CODEX_MODEL:-}
     env_file:
       - path: .env
@@ -42,15 +39,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
-  ollama:
-    image: ollama/ollama:latest
-    network_mode: host
-    profiles: ["local-ai"]
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      OLLAMA_HOST: 127.0.0.1:11434
 
   codex:
     build:
@@ -70,5 +58,4 @@ volumes:
   postgres_data:
   next_build:
   uploads:
-  ollama_models:
   codex_socket:

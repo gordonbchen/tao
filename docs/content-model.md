@@ -2,13 +2,13 @@
 
 ## Current state
 
-Tao stores an uploaded file, its extracted text, and a model summary on the resource. The summary is generated from the full extracted text in sections when an AI provider is configured, and stores its provider, model, and status. Students can view summary and extraction in separate tabs. Topic records contain a name, a coverage flag, and review scheduling data. Upload suggestions are deterministic headings; topic summaries and evidence links are still planned. Problem generation currently selects up to three relevant resource excerpts.
+Tao stores an uploaded file, its extracted text, and a model summary on the resource. The summary is generated from the full extracted text in sections when Codex is connected, and stores its model and status. Students can view summary and extraction in separate tabs. Topics have names, review state, and editable coverage summaries generated from linked resources. The `topic_resources` table links many topics and resources within a subject; either viewer can add or remove links. Upload suggestions still use deterministic headings. Problem generation uses topic coverage and linked excerpts, with a temporary subject-resource fallback for older topics without links.
 
 ## Planned records
 
 - **Resource:** original file, extracted text, extraction status, and a reviewable summary of definitions, results, examples, and boundaries covered in that file. Extraction and summary, provider, model, and summary status are implemented. Source revision tracking and student editing of summaries remain planned.
-- **Topic:** name, editable confirmed coverage text, and an AI-proposed coverage draft. Keep student edits separate from generated drafts. A topic may draw on many resources.
-- **Topic evidence:** a many-to-many link between a topic and a resource, with the specific page or text span, optional note, and status. Permit several distinct evidence passages from the same resource for one topic. Repeating an attach action should find new relevant passages or refresh a draft; it should not duplicate identical evidence.
+- **Topic:** name and editable coverage summary are implemented. A separate AI draft and student-confirmed revision remain planned so regenerating a summary cannot overwrite student edits without review.
+- **Topic evidence:** many-to-many links are implemented at resource level. Specific page or text spans, optional notes, and repeated distinct evidence passages from the same resource remain planned.
 - **Subject overview:** derive it from confirmed topics and their evidence, rather than maintaining another independent AI summary.
 
 ## Workflow
@@ -22,6 +22,6 @@ Tao stores an uploaded file, its extracted text, and a model summary on the reso
 
 ## Provider behavior
 
-The database and files remain local. Ollama can process them offline. Codex CLI runs locally but sends the selected text to an OpenAI model through the user's login. The optional API-key path behaves similarly. AI summaries are suggestions, not proof that material was covered or that a mathematical claim is correct.
+The database and files remain local. Codex CLI runs locally but sends selected text to a hosted model through the user's login. AI summaries are suggestions, not proof that material was covered or that a mathematical claim is correct.
 
 Implement these records and screens incrementally. Do not add a separate search service or vector database unless real documents show that simpler passage matching fails.

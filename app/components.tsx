@@ -7,31 +7,26 @@ import { CircleHelp, Moon, Settings, Sun } from "lucide-react";
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
-type Provider = "codex" | "ollama" | "openai";
-type ProviderStatus = { id: Provider; label: string; available: boolean; models: string[] };
-type AIStatus = { providers: ProviderStatus[]; usage: { label: string; percentRemaining?: number } };
-type AISettingsValue = { provider: Provider; model: string; apiKey: string; configured: boolean; ready: boolean; providers: ProviderStatus[]; usage: AIStatus["usage"] };
-let aiSettingsSnapshot: AISettingsValue = { provider: "codex", model: "gpt-6-luna", apiKey: "", configured: false, ready: false, providers: [], usage: { label: "Usage unavailable" } };
+type AIStatus = { available: boolean; models: string[]; defaultModel: string };
+type AIUsage = { usedPercent: number | null; remainingPercent: number | null; windowDurationMins: number | null; resetsAt: number | null; lifetimeTokens: number | null };
+type AISettingsValue = { model: string; configured: boolean; ready: boolean; usage: AIUsage };
+const emptyUsage: AIUsage = { usedPercent: null, remainingPercent: null, windowDurationMins: null, resetsAt: null, lifetimeTokens: null };
+let aiSettingsSnapshot: AISettingsValue = { model: "gpt-6-luna", configured: false, ready: false, usage: emptyUsage };
 const aiSettingsListeners = new Set<() => void>();
 function updateAISettings(patch: Partial<AISettingsValue>) { aiSettingsSnapshot = { ...aiSettingsSnapshot, ...patch }; aiSettingsListeners.forEach(listener => listener()); }
 const subscribeAISettings = (listener: () => void) => { aiSettingsListeners.add(listener); return () => { aiSettingsListeners.delete(listener); }; };
 const getAISettingsSnapshot = () => aiSettingsSnapshot;
-let requestProvider: Provider = "codex";
 let requestModel = "gpt-6-luna";
-let requestApiKey = "";
 export function getAiRequestHeaders(): HeadersInit {
-  return { "X-Tao-AI-Provider": requestProvider, "X-Tao-AI-Model": requestModel, ...(requestApiKey ? { "X-OpenAI-API-Key": requestApiKey } : {}) };
+  return { "X-Tao-AI-Model": requestModel };
 }
 export function notifyAiSetupRequired() { window.dispatchEvent(new Event("tao:ai-setup-required")); }
 export function useAISettings() {
   const snapshot = useSyncExternalStore(subscribeAISettings, getAISettingsSnapshot, getAISettingsSnapshot);
-  return { ...snapshot, setProvider: updateProvider, setModel: updateModel, setApiKey: updateApiKey, requestHeaders: getAiRequestHeaders() };
+  return { ...snapshot, setModel: updateModel, requestHeaders: getAiRequestHeaders() };
 }
 export function getAiSettingsSnapshot() { return { ready: aiSettingsSnapshot.ready, configured: aiSettingsSnapshot.configured }; }
-function updateProvider(provider: Provider) { requestProvider = provider; localStorage.setItem("tao-ai-provider", provider); const model = aiSettingsSnapshot.providers.find(item => item.id === provider)?.models[0] || ""; requestModel = model; localStorage.setItem("tao-ai-model", model); updateAISettings({ provider, model, configured: providerReady(provider, model, requestApiKey) }); }
-function updateModel(model: string) { requestModel = model; localStorage.setItem("tao-ai-model", model); updateAISettings({ model, configured: providerReady(aiSettingsSnapshot.provider, model, requestApiKey) }); }
-function updateApiKey(key: string) { requestApiKey = key; updateAISettings({ apiKey: key, configured: providerReady(aiSettingsSnapshot.provider, aiSettingsSnapshot.model, key) }); }
-function providerReady(provider: Provider, _model: string, key: string) { const option = aiSettingsSnapshot.providers.find(item => item.id === provider); return Boolean(option?.available && (provider !== "openai" || key.trim())); }
+function updateModel(model: string) { requestModel = model; localStorage.setItem("tao-ai-model", model); updateAISettings({ model }); }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -104,52 +99,36 @@ function UndoToast() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState("light");
   const [panel, setPanel] = useState<"help" | "settings" | null>(null);
-  const [status, setStatus] = useState<AIStatus>({ providers: [], usage: { label: "Usage unavailable" } });
-  const [provider, setProviderState] = useState<Provider>("codex");
+  const [status, setStatus] = useState<AIStatus>({ available: false, models: [], defaultModel: "gpt-6-luna" });
   const [model, setModelState] = useState("gpt-6-luna");
-  const [apiKey, setApiKeyState] = useState(requestApiKey);
+  const [usage, setUsage] = useState<AIUsage>(emptyUsage);
   const [aiNotice, setAiNotice] = useState(false);
   useEffect(() => {
     const refreshUsage = () => {
-      void fetch("/api/ai/usage").then(r => r.json()).then((usage: AIStatus["usage"]) => {
-        setStatus(current => ({ ...current, usage }));
-        aiSettingsSnapshot = { ...aiSettingsSnapshot, usage };
-        aiSettingsListeners.forEach(listener => listener());
+      void fetch("/api/ai/usage").then(r => r.json()).then((result: AIUsage) => {
+        setUsage(result);
+        updateAISettings({ usage: result });
       }).catch(() => undefined);
     };
     const saved = localStorage.getItem("tao-theme");
     if (saved === "dark") { setTheme("dark"); document.documentElement.dataset.theme = "dark"; }
-    void fetch("/api/ai/status").then(r => r.json()).then((data: AIStatus & { defaultProvider: Provider; defaultModel: string }) => {
+    void fetch("/api/ai/status").then(r => r.json()).then((data: AIStatus) => {
       setStatus(data);
-      const storedProvider = localStorage.getItem("tao-ai-provider") as Provider | null;
-      const nextProvider = storedProvider && data.providers.some(item => item.id === storedProvider) ? storedProvider : data.defaultProvider;
       const storedModel = localStorage.getItem("tao-ai-model");
-      const currentProviderStatus = data.providers.find(item => item.id === nextProvider);
-      const nextModel = currentProviderStatus?.models.includes(storedModel || "") ? storedModel! : (nextProvider === data.defaultProvider ? data.defaultModel : currentProviderStatus?.models[0]) || "";
-      setProviderState(nextProvider);
+      const nextModel = storedModel && data.models.includes(storedModel) ? storedModel : data.defaultModel;
       setModelState(nextModel);
-      requestProvider = nextProvider; requestModel = nextModel;
-      const key = requestApiKey;
-      aiSettingsSnapshot = { provider: nextProvider, model: nextModel, apiKey: key, configured: Boolean(currentProviderStatus?.available && (nextProvider !== "openai" || key.trim())), ready: true, providers: data.providers, usage: data.usage };
-      aiSettingsListeners.forEach(listener => listener());
+      requestModel = nextModel;
+      updateAISettings({ model: nextModel, configured: data.available, ready: true });
       refreshUsage();
     }).catch(() => {
-      const providers: ProviderStatus[] = [{ id: "openai", label: "OpenAI API", available: true, models: ["gpt-4o-mini"] }];
-      requestProvider = "openai"; requestModel = "gpt-4o-mini";
-      aiSettingsSnapshot = { provider: "openai", model: "gpt-4o-mini", apiKey: requestApiKey, configured: false, ready: true, providers, usage: { label: "Usage unavailable" } };
-      aiSettingsListeners.forEach(listener => listener());
-      setProviderState("openai"); setModelState("gpt-4o-mini");
+      updateAISettings({ configured: false, ready: true });
     });
     const onSetupRequired = () => { setPanel("settings"); setAiNotice(true); };
     window.addEventListener("tao:ai-setup-required", onSetupRequired);
     const usageTimer = window.setInterval(refreshUsage, 60_000);
     return () => { window.removeEventListener("tao:ai-setup-required", onSetupRequired); window.clearInterval(usageTimer); };
   }, []);
-  function setProvider(next: Provider) { updateProvider(next); setProviderState(next); setModelState(aiSettingsSnapshot.model); }
   function setModel(next: string) { updateModel(next); setModelState(next); }
-  function setApiKey(next: string) { updateApiKey(next); setApiKeyState(next); }
-  const selected = status.providers.find(item => item.id === provider);
-  const configured = Boolean(selected?.available && (provider !== "openai" || !!apiKey.trim()));
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -160,18 +139,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <header className="site-header"><div className="site-header-inner">
       <Link className="site-brand" href="/"><Image src="/icon.svg" alt="" width={30} height={30} /><span>Tao</span></Link>
       <nav className="header-actions" aria-label="Site controls">
-        <label className="model-control" title="Select AI model"><span>{selected?.label || "No model"}</span><select aria-label="AI model" disabled={!selected?.models.length} value={model} onChange={e => setModel(e.target.value)}>{selected?.models.map(option => <option key={option} value={option}>{option}</option>)}</select></label>
-        <span className="usage-indicator" title={provider === "codex" ? status.usage.label : "Provider usage unavailable"}>{provider === "codex" ? status.usage.label : "Usage unavailable"}</span>
+        <label className="model-control" title="Select Codex model"><span>Codex</span><select aria-label="Codex model" disabled={!status.available} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option} value={option}>{option}</option>)}</select></label>
+        <div className="usage-meter" title={usage.remainingPercent === null ? "Codex allowance is unavailable" : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`} aria-label={usage.remainingPercent === null ? "Codex usage unavailable" : `${usage.remainingPercent}% usage remaining`}>
+          <span>Usage remaining</span><div className="usage-track"><div style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div><strong>{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
+        </div>
         <button type="button" aria-label="Help" title="Help" aria-expanded={panel === "help"} onClick={() => setPanel(panel === "help" ? null : "help")}><CircleHelp size={20} /></button>
-      <button type="button" aria-label="Settings" title="Settings" aria-expanded={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}><Settings size={20} /></button>
+        <button type="button" aria-label="Settings" title="Settings" aria-expanded={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}><Settings size={20} /></button>
         <button type="button" aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</button>
       </nav>
       {panel && <div className="header-popover" role="region" aria-label={panel === "help" ? "Help" : "Settings"}>
         {panel === "help" ? <><strong>How to use Tao</strong><p>Add topics and course resources to a subject, then choose Practice. Ask for a hint as you work; Shift+Enter sends a chat message.</p></> : <><strong>AI settings</strong>
-          <label className="setting-field">Provider<select value={provider} onChange={e => setProvider(e.target.value as Provider)}>{status.providers.map(item => <option key={item.id} value={item.id} disabled={!item.available}>{item.label}{item.available ? "" : " (not configured)"}</option>)}</select></label>
-          {provider === "openai" && <label className="setting-field">OpenAI API key<input type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…"/><small>Held in memory for this browser tab; it is not saved.</small></label>}
-          {!configured && <p className="settings-error">{aiNotice ? "Choose a configured provider to continue." : "Choose a configured AI provider to practice."}</p>}
-          {provider === "codex" && <p>Codex uses your local CLI login and a hosted model. Usage limits depend on your account.</p>}
+          <p>{status.available ? "Codex is running locally. Your CLI login is used when you study." : "Start the local-codex Docker profile and sign in to Codex."}</p>
+          {!status.available && aiNotice && <p className="settings-error">Codex must be connected before practicing or summarizing.</p>}
+          <p>Codex uses hosted models. Choose a model in the top bar.</p>
+          {usage.lifetimeTokens !== null && <p>Account token activity: {usage.lifetimeTokens.toLocaleString()} lifetime tokens.</p>}
+          {usage.resetsAt !== null && <p>Allowance resets {new Date(usage.resetsAt * 1000).toLocaleString()}.</p>}
         </>}
       </div>}
     </div></header>

@@ -9,14 +9,15 @@ export async function GET(_request: Request, { params }: RouteContext) {
   const subjectResult = await query(`SELECT id, name, created_at AS "createdAt" FROM subjects WHERE id = $1 AND owner_id = $2`, [subjectId, LOCAL_OWNER_ID]);
   if (!subjectResult.rows[0]) return jsonError("Subject not found", 404);
   const [topicsResult, resourcesResult] = await Promise.all([
-    query(`SELECT t.id, t.name, t.coverage_confirmed AS "coverageConfirmed",
+    query(`SELECT t.id, t.name, t.coverage_confirmed AS "coverageConfirmed", t.summary_status AS "summaryStatus",
       json_build_object('dueAt', r.due_at, 'intervalDays', r.interval_days, 'repetitions', r.repetitions,
         'lastRating', r.last_rating, 'lastCorrectness', r.last_correctness) AS review
       FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id
       WHERE t.subject_id = $1 ORDER BY t.created_at`, [subjectId]),
-    query(`SELECT id, filename, content_type AS "contentType", extraction_status AS "extractionStatus",
+    query(`SELECT r.id, r.filename, r.content_type AS "contentType", r.extraction_status AS "extractionStatus",
       summary_status AS "summaryStatus", created_at AS "createdAt"
-      FROM resources WHERE subject_id = $1 AND owner_id = $2 ORDER BY created_at DESC`, [subjectId, LOCAL_OWNER_ID])
+      , COALESCE((SELECT json_agg(tr.topic_id) FROM topic_resources tr WHERE tr.resource_id = r.id), '[]'::json) AS "topicIds"
+      FROM resources r WHERE subject_id = $1 AND owner_id = $2 ORDER BY created_at DESC`, [subjectId, LOCAL_OWNER_ID])
   ]);
   return Response.json({ subject: subjectResult.rows[0], topics: topicsResult.rows, resources: resourcesResult.rows });
 }

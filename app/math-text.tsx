@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
 
 type MathJaxApi = {
   typesetPromise: (elements: HTMLElement[]) => Promise<void>;
@@ -59,4 +60,21 @@ export function MathText({ text, className }: { text: string; className?: string
     return () => { active = false; window.MathJax?.typesetClear?.([element]); };
   }, [text]);
   return <div ref={ref} className={className}>{text}</div>;
+}
+
+export function MarkdownMathText({ text, className }: { text: string; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    let active = true;
+    void loadMathJax().then(async (mathjax) => {
+      if (active) await mathjax.typesetPromise([element]);
+    }).catch(() => {});
+    return () => { active = false; window.MathJax?.typesetClear?.([element]); };
+  }, [text]);
+  // CommonMark treats backslashes before parentheses and brackets as escapes.
+  // Double them so MathJax still sees the TeX delimiters after Markdown parsing.
+  const markdown = text.replace(/\\([()[\]])/g, "\\\\$1");
+  return <div ref={ref} className={className}><ReactMarkdown key={text}>{markdown}</ReactMarkdown></div>;
 }

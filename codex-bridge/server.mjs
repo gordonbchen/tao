@@ -36,9 +36,30 @@ function accountUsage() {
     const child = spawn("codex", ["app-server", "--listen", "stdio://"], { stdio: ["pipe", "pipe", "pipe"] });
     let buffer = "";
     let errorText = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), 12_000);
+    let rateLimits = null;
+    let tokenCount = null;
+    let rateDone = false;
+    let tokensDone = false;
     let finished = false;
-    const finish = (value, error) => { if (finished) return; finished = true; clearTimeout(timer); child.kill("SIGTERM"); if (error) reject(error); else resolve(value); };
+    const finish = (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      child.kill("SIGTERM");
+      if (error) reject(error);
+      else {
+        const windows = [rateLimits?.primary, rateLimits?.secondary].filter(window => Number.isFinite(window?.usedPercent));
+        const limitingWindow = windows.sort((a, b) => b.usedPercent - a.usedPercent)[0];
+        resolve({
+          usedPercent: limitingWindow?.usedPercent ?? null,
+          windowDurationMins: limitingWindow?.windowDurationMins ?? null,
+          resetsAt: limitingWindow?.resetsAt ?? null,
+          lifetimeTokens: tokenCount,
+        });
+      }
+    };
+    const maybeFinish = () => { if (rateDone && tokensDone) finish(); };
+    const timer = setTimeout(() => finish(new Error("Codex usage timed out")), 12_000);
     const send = value => child.stdin.write(`${JSON.stringify(value)}\n`);
     const onLine = line => {
       let message;
@@ -49,15 +70,19 @@ function accountUsage() {
         send({ id: 3, method: "account/usage/read", params: { threadId: null } });
       }
       if (message.id === 2 && message.result) {
-        const usage = message.id === 2 ? { rateLimits: message.result.rateLimits, rateLimitsByLimitId: message.result.rateLimitsByLimitId } : {};
-        child._taoUsage = usage;
+        rateLimits = message.result.rateLimits || message.result.rateLimitsByLimitId?.codex || null;
+        rateDone = true;
+        maybeFinish();
       }
       if (message.id === 3 && message.result) {
-        const used = child._taoUsage?.rateLimits?.primary?.usedPercent;
-        const tokenCount = message.result.summary?.lifetimeTokens;
-        finish({ usedPercent: Number.isInteger(used) ? used : null, lifetimeTokens: Number.isFinite(tokenCount) ? tokenCount : null });
+        const count = message.result.summary?.lifetimeTokens;
+        tokenCount = Number.isFinite(count) ? count : null;
+        tokensDone = true;
+        maybeFinish();
       }
-      if (message.id && message.error) finish(null, new Error("Codex usage unavailable"));
+      if (message.id === 2 && message.error) { rateDone = true; maybeFinish(); }
+      if (message.id === 3 && message.error) { tokensDone = true; maybeFinish(); }
+      if (message.id === 1 && message.error) finish(new Error("Codex account unavailable"));
     };
     child.stdout.setEncoding("utf8").on("data", chunk => {
       buffer += chunk;
@@ -65,13 +90,17 @@ function accountUsage() {
       while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); onLine(line); }
     });
     child.stderr.setEncoding("utf8").on("data", chunk => { errorText = (errorText + chunk).slice(-2000); });
-    child.on("error", error => finish(null, error));
-    child.on("close", () => { if (!finished) finish(null, new Error(errorText || "Codex usage unavailable")); });
+    child.on("error", error => finish(error));
+    child.on("close", () => { if (!finished) finish(new Error(errorText || "Codex usage unavailable")); });
     send({ id: 1, method: "initialize", params: { clientInfo: { name: "tao", title: "Tao", version: "0.1.0" }, capabilities: {} } });
   });
 }
 
 createServer(async (request, response) => {
+    if (request.method === "GET" && request.url === "/health") {
+      response.writeHead(200, { "Content-Type": "application/json" }).end('{"available":true}');
+      return;
+    }
     if (request.method === "GET" && request.url === "/usage") {
       try { response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(await accountUsage())); }
       catch { response.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Usage unavailable" })); }

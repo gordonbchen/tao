@@ -8,10 +8,17 @@ import { api, AppShell, LoadingCard, notifyAiSetupRequired, Subject, useAISettin
 import { MathText } from "../../math-text";
 
 type Topic = { id: string; name: string };
-type Problem = { id: string; topicId: string; prompt: string; difficulty: string };
+type Problem = { id: string; topicId: string; prompt: string; difficulty: string; isReview?: boolean };
 type Message = { role: "assistant" | "user"; text: string };
 type Feedback = { feedback: string; correctness: "correct" | "partial" | "incorrect" | "uncertain"; solution?: string };
 const ratings = [{ value: "easy", label: "Easy" }, { value: "okay", label: "Okay" }, { value: "hard", label: "Hard" }, { value: "could_not_solve", label: "Couldn’t solve" }];
+const skipReasons = [
+  { value: "too_easy", label: "Too easy" },
+  { value: "repetitive", label: "Repetitive" },
+  { value: "incorrect", label: "Incorrect" },
+  { value: "outside_coverage", label: "Outside my course" },
+  { value: "other", label: "Other" },
+];
 
 export default function StudyPage() {
   return <AppShell><StudyContent /></AppShell>;
@@ -29,6 +36,12 @@ function StudyContent() {
   const [rating, setRating] = useState("okay");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [showSolution, setShowSolution] = useState(false);
+  const [showProblemFeedback, setShowProblemFeedback] = useState(false);
+  const [feedbackMode, setFeedbackMode] = useState<"skip" | "feedback">("skip");
+  const [problemFeedbackTags, setProblemFeedbackTags] = useState<string[]>([]);
+  const [problemFeedbackNote, setProblemFeedbackNote] = useState("");
+  const [savingProblemFeedback, setSavingProblemFeedback] = useState(false);
+  const [problemFeedbackSaved, setProblemFeedbackSaved] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatText, setChatText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -53,7 +66,7 @@ function StudyContent() {
     return headers;
   }, [ai.requestHeaders]);
 
-  const generate = useCallback(async (requestedTopic = topicId) => {
+  const generate = useCallback(async (requestedTopic = topicId, skipReuse = false) => {
     if (!ai.ready) return;
     if (!ai.configured) {
       setGenerating(false);
@@ -63,8 +76,9 @@ function StudyContent() {
     }
     setWorking(true); setGenerating(true); setError("");
     try {
-      const result = await api<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: aiHeaders(), body: JSON.stringify(requestedTopic ? { topicId: requestedTopic } : {}) });
+      const result = await api<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ ...(requestedTopic ? { topicId: requestedTopic } : {}), ...(skipReuse ? { skipReuse: true } : {}) }) });
       setProblem(result.problem); setFeedback(null); setShowSolution(false); setAnswer(""); setRating("okay"); setChatText(""); setMessages([]);
+      setShowProblemFeedback(false); setProblemFeedbackTags([]); setProblemFeedbackNote(""); setProblemFeedbackSaved(false);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create a problem"); }
     finally { setWorking(false); setGenerating(false); }
   }, [ai.configured, ai.ready, aiHeaders, subjectId, topicId]);
@@ -116,8 +130,38 @@ function StudyContent() {
     finally { setWorking(false); }
   }
 
+  async function submitProblemFeedback(e: React.FormEvent) {
+    e.preventDefault();
+    if (!problem || savingProblemFeedback || working) return;
+    setSavingProblemFeedback(true); setError("");
+    try {
+      const result = await api<{ saved: boolean }>(`/api/problems/${problem.id}/feedback`, {
+        method: "POST", headers: aiHeaders(),
+        body: JSON.stringify({ tags: problemFeedbackTags, note: problemFeedbackNote.trim(), skipped: feedbackMode === "skip" }),
+      });
+      setShowProblemFeedback(false);
+      setProblemFeedbackSaved(result.saved);
+      if (feedbackMode === "skip") await generate(topicId, true);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save problem feedback"); }
+    finally { setSavingProblemFeedback(false); }
+  }
+
+  function openProblemFeedback(mode: "skip" | "feedback") {
+    setFeedbackMode(mode);
+    setProblemFeedbackTags([]);
+    setProblemFeedbackNote("");
+    setProblemFeedbackSaved(false);
+    setShowProblemFeedback(true);
+  }
+
   const correctnessLabel = feedback?.correctness === "correct" ? "That’s right" : feedback?.correctness === "partial" ? "Good progress" : feedback?.correctness === "incorrect" ? "Let’s work through it" : "Let’s take a closer look";
   const FeedbackIcon = feedback?.correctness === "correct" ? CheckCircle2 : feedback?.correctness === "incorrect" ? TriangleAlert : feedback?.correctness === "uncertain" ? CircleHelp : ThumbsUp;
+  const problemFeedbackForm = showProblemFeedback && <form className="card skip-feedback" onSubmit={submitProblemFeedback}>
+    <div className="skip-feedback-heading">What should change? <span>Optional</span></div>
+    <div className="skip-reasons">{skipReasons.map(reason => <button key={reason.value} type="button" className={`skip-reason ${problemFeedbackTags.includes(reason.value) ? "selected" : ""}`} aria-pressed={problemFeedbackTags.includes(reason.value)} onClick={() => setProblemFeedbackTags(current => current.includes(reason.value) ? current.filter(tag => tag !== reason.value) : [...current, reason.value])}>{reason.label}</button>)}</div>
+    <textarea className="skip-note" rows={2} value={problemFeedbackNote} onChange={e => setProblemFeedbackNote(e.target.value)} maxLength={2000} placeholder="How could this problem be better?" />
+    <div className="skip-actions"><button type="button" className="button" onClick={() => setShowProblemFeedback(false)} disabled={savingProblemFeedback}>Cancel</button><button className="button button-primary" disabled={savingProblemFeedback}>{savingProblemFeedback ? <><span className="spinner" />Saving…</> : feedbackMode === "skip" ? "Skip and continue" : "Save feedback"}</button></div>
+  </form>;
 
   return <div className="content study-content">
       <Link href={`/subjects/${subjectId}`} className="study-back"><ArrowLeft size={18} />{subject?.name || "Subject"}</Link>
@@ -128,12 +172,17 @@ function StudyContent() {
           <p><Link className="back-link" href={`/subjects/${subjectId}`}><ArrowLeft size={18} />Back to subject</Link></p>
         </>}</div> : <div className="study-layout">
           <div className="problem-column">
-            <section className="card problem-card"><div className="problem-meta"><span className="topic-chip">{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</span><span className="difficulty-chip">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</span></div><MathText className="problem-prompt" text={problem.prompt} /></section>
-            {!feedback ? <form className="card answer-panel" onSubmit={submitAttempt}><textarea ref={answerInput} rows={4} className="answer-box" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
+            <section className="card problem-card"><div className="problem-meta"><span className="topic-chip">{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</span>{problem.isReview && <span className="review-chip">Review again</span>}<span className="difficulty-chip">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</span></div><MathText className="problem-prompt" text={problem.prompt} /></section>
+            {error && <div className="error-message">{error}</div>}
+            {!feedback ? <><form className="card answer-panel" onSubmit={submitAttempt}><textarea ref={answerInput} rows={4} className="answer-box" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
               {answer.includes("\\(") || answer.includes("\\[") ? <div className="answer-preview"><span>Math preview</span><MathText className="answer-preview-content" text={answer} /></div> : null}
               <div className="answer-control-row"><div className="difficulty-control"><div className="rating-label">Difficulty</div><div className="rating-row">{ratings.map(option => <button type="button" key={option.value} className={`rating-option ${rating === option.value ? "active" : ""}`} onClick={() => setRating(option.value)}>{option.label}</button>)}</div></div>
-                <button className="button button-primary answer-submit" disabled={!answer.trim() || working}>{working ? <><span className="spinner" />Checking…</> : <>Check answer <ArrowRight size={13} /></>}</button></div>{error && <div className="error-message">{error}</div>}
-            </form> : <section className={`feedback-card ${feedback.correctness}`}><div className="feedback-title"><FeedbackIcon size={15} />{correctnessLabel}</div><MathText className="feedback-copy" text={feedback.feedback} />{feedback.solution && <button className="solution-toggle" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide worked solution" : "Show worked solution"}</button>}{showSolution && feedback.solution && <MathText className="math-block" text={feedback.solution} />}<div className="next-problem"><button className="button button-primary button-small" onClick={() => generate()} disabled={working}>{working ? <span className="spinner" /> : <>Try another problem <ArrowRight size={12} /></>}</button></div></section>}
+                <button className="button button-primary answer-submit" disabled={!answer.trim() || working}>{working ? <><span className="spinner" />Checking…</> : <>Check answer <ArrowRight size={13} /></>}</button></div>
+            </form>
+              {!showProblemFeedback ? <button type="button" className="skip-question" onClick={() => openProblemFeedback("skip")} disabled={working}>Skip question</button> : problemFeedbackForm}</> : <><section className={`feedback-card ${feedback.correctness}`}><div className="feedback-title"><FeedbackIcon size={15} />{correctnessLabel}</div><MathText className="feedback-copy" text={feedback.feedback} />{feedback.solution && <button className="solution-toggle" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide worked solution" : "Show worked solution"}</button>}{showSolution && feedback.solution && <MathText className="math-block" text={feedback.solution} />}<div className="next-problem"><button className="button button-primary button-small" onClick={() => generate()} disabled={working}>{working ? <span className="spinner" /> : <>Try another problem <ArrowRight size={12} /></>}</button></div></section>
+                {problemFeedbackSaved && <p className="feedback-saved" role="status">Thanks, your feedback will guide future questions on this topic.</p>}
+                {!showProblemFeedback ? <button type="button" className="skip-question" onClick={() => openProblemFeedback("feedback")}>Give feedback on this problem</button> : problemFeedbackForm}
+              </>}
           </div>
           <aside className="card chat-card"><div className="chat-head"><strong>Ask for a hint</strong></div><div className="chat-messages">{messages.map((message, i) => <MathText key={i} className={`chat-msg ${message.role}`} text={message.text} />)}{chatBusy && <div className="chat-msg assistant"><span className="spinner" />Thinking…</div>}</div><div className="chat-suggestions"><button className="suggestion" onClick={() => askTutor(undefined, "Can I get a small hint?")} disabled={chatBusy}>Hint</button></div><form className="chat-input-wrap" onSubmit={askTutor}><textarea className="chat-input" rows={2} value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} placeholder="Where are you stuck?" /><button className="send-button" aria-label="Send message" disabled={!chatText.trim() || chatBusy}><Send size={17} /></button></form></aside>
         </div>}

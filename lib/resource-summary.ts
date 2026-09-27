@@ -15,10 +15,10 @@ function splitText(text: string, maxChars = 18_000) {
   return chunks;
 }
 
-export async function summarizeResource(filename: string, extractedText: string, apiKey?: string, options?: AiOptions) {
+export async function summarizeResource(filename: string, extractedText: string, options?: AiOptions) {
   const chunks = splitText(extractedText);
   const summaries: string[] = [];
-  let provider: "codex" | "ollama" | "openai" | undefined;
+  let provider: "codex" | undefined;
   let model: string | undefined;
   for (let start = 0; start < chunks.length; start += 2) {
     const batch = chunks.slice(start, start + 2);
@@ -28,7 +28,6 @@ export async function summarizeResource(filename: string, extractedText: string,
         "resource_summary",
         "Summarize this section of a course resource for a student. Preserve the important definitions, claims, methods, assumptions, examples, notation, and scope limits in this section. Be concise but cover all examinable information. Organize the result with a short heading and bullets. Preserve math using \\(...\\) inline and \\[...\\] for display. Do not add outside facts. Keep this section summary under about 2,500 characters. Return JSON with a single string property named summary.",
         JSON.stringify({ filename, part, totalParts: chunks.length, extractedText: chunk }),
-        apiKey,
         options,
       );
       if (!value || typeof value !== "object" || typeof (value as { summary?: unknown }).summary !== "string") {

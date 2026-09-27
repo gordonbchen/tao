@@ -1,6 +1,8 @@
 import { request as httpRequest } from "node:http";
 
-function readCodexUsage(): Promise<{ usedPercent: number | null; lifetimeTokens: number | null }> {
+type CodexUsage = { usedPercent: number | null; windowDurationMins: number | null; resetsAt: number | null; lifetimeTokens: number | null };
+
+function readCodexUsage(): Promise<CodexUsage> {
   return new Promise((resolve, reject) => {
     const req = httpRequest({ socketPath: "/run/tao-codex/socket", path: "/usage", method: "GET", timeout: 12_000 }, response => {
       let body = "";
@@ -9,8 +11,13 @@ function readCodexUsage(): Promise<{ usedPercent: number | null; lifetimeTokens:
       response.on("end", () => {
         try {
           if (response.statusCode !== 200) return reject(new Error("Usage unavailable"));
-          const data = JSON.parse(body) as { usedPercent?: number; lifetimeTokens?: number };
-          resolve({ usedPercent: Number.isInteger(data.usedPercent) ? data.usedPercent! : null, lifetimeTokens: Number.isFinite(data.lifetimeTokens) ? data.lifetimeTokens! : null });
+          const data = JSON.parse(body) as Partial<CodexUsage>;
+          resolve({
+            usedPercent: Number.isInteger(data.usedPercent) && data.usedPercent! >= 0 && data.usedPercent! <= 100 ? data.usedPercent! : null,
+            windowDurationMins: Number.isFinite(data.windowDurationMins) ? data.windowDurationMins! : null,
+            resetsAt: Number.isFinite(data.resetsAt) ? data.resetsAt! : null,
+            lifetimeTokens: Number.isFinite(data.lifetimeTokens) ? data.lifetimeTokens! : null,
+          });
         } catch { reject(new Error("Usage unavailable")); }
       });
     });
@@ -21,12 +28,11 @@ function readCodexUsage(): Promise<{ usedPercent: number | null; lifetimeTokens:
 }
 
 export async function GET() {
-  if (process.env.AI_PROVIDER !== "codex") return Response.json({ label: "Usage unavailable", usedPercent: null, lifetimeTokens: null });
   try {
     const usage = await readCodexUsage();
-    const label = `Codex primary allowance: ${usage.usedPercent === null ? "limit unavailable" : `${usage.usedPercent}% used`}${usage.lifetimeTokens === null ? "" : ` · lifetime ${usage.lifetimeTokens.toLocaleString()} tokens`}`;
-    return Response.json({ ...usage, label });
+    const remainingPercent = usage.usedPercent === null ? null : 100 - usage.usedPercent;
+    return Response.json({ ...usage, remainingPercent });
   } catch {
-    return Response.json({ label: "Usage unavailable", usedPercent: null, lifetimeTokens: null });
+    return Response.json({ usedPercent: null, remainingPercent: null, windowDurationMins: null, resetsAt: null, lifetimeTokens: null });
   }
 }
