@@ -14,3 +14,4 @@
 - [x] Allow several resource files per selection and queue suggestions; use one vertical scroll area in summary viewers.
 - [x] Let a topic select multiple linked resources, save links together, and automatically regenerate its coverage summary once.
 - [x] Replace the topic resource dropdown with selected and searchable available rows.
+- [x] Mark staged topic resource additions and removals, and document a portable Docker setup for another machine.

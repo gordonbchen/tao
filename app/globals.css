@@ -114,6 +114,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .topic-resource-choice:hover { color: var(--accent); }
 .topic-resource-choice > svg:first-child { flex: none; color: var(--muted); }
 .topic-resource-choice span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.topic-resource-choice .resource-change-badge { flex: none; padding: 2px 8px; border-radius: 99px; background: var(--paper); color: var(--muted); font-size: 14px; }
+.topic-resource-choice .resource-change-badge.pending { background: var(--accent-soft); color: var(--accent); }
+.topic-resource-choice .resource-change-badge.pending-remove { background: #f9ebe7; color: #853f2d; }
+[data-theme="dark"] .topic-resource-choice .resource-change-badge.pending-remove { background: #4a302b; color: #ffbaa7; }
 .topic-resource-choice .choice-icon { flex: none; color: var(--accent); }
 .topic-resource-empty { margin: 14px 0 0; color: var(--muted); }
 @media (max-width: 520px) { .topic-resource-available { align-items: stretch; flex-direction: column; } .topic-resource-available input { width: 100%; } }

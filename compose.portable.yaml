@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tao
+      POSTGRES_PASSWORD: tao_local_only
+      POSTGRES_DB: tao
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tao -d tao"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    command: ["./node_modules/.bin/next", "dev", "--hostname", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: postgres://tao:tao_local_only@db:5432/tao
+      UPLOAD_DIR: /app/uploads
+      CODEX_MODEL: ${CODEX_MODEL:-}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./app:/app/app
+      - ./lib:/app/lib
+      - ./db:/app/db
+      - ./next.config.ts:/app/next.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - next_build:/app/.next
+      - uploads:/app/uploads
+      - codex_socket:/run/tao-codex
+    depends_on:
+      db:
+        condition: service_healthy
+
+  codex:
+    build:
+      context: .
+      dockerfile: Dockerfile.codex
+    profiles: ["local-codex"]
+    environment:
+      CODEX_HOME: /codex-auth
+      CODEX_MODEL: ${CODEX_MODEL:-}
+    volumes:
+      - ${CODEX_AUTH_DIR:-./.codex-tao}:/codex-auth
+      - codex_socket:/run/tao-codex
+
+volumes:
+  postgres_data:
+  next_build:
+  uploads:
+  codex_socket:
