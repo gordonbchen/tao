@@ -4,7 +4,6 @@
     <rect x="4" y="4" width="92" height="92"/>
     <g id="quarter">
       <path d="M50 4C24.6 4 4 24.6 4 50"/>
-      <path d="M50 4 4 50"/>
       <path d="M50 4C50 29 29 50 4 50"/>
     </g>
     <use href="#quarter" transform="rotate(90 50 50)"/>
