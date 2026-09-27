@@ -75,13 +75,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .resource-list li > svg { flex: none; color: var(--muted); }
 .resource-open { flex: 1; min-width: 0; padding: 4px 0; border: 0; background: transparent; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .resource-open:hover { color: var(--accent); text-decoration: underline; }
-.modal.resource-modal { width: min(calc(100vw - 48px), 1500px); max-width: none; max-height: min(92vh, 1000px); }
+.resource-backdrop { overflow: hidden; }
+.modal.resource-modal { width: min(calc(100vw - 48px), 1500px); max-width: none; max-height: calc(100dvh - 40px); }
 .resource-tabs { display: flex; gap: 22px; margin: -4px 0 18px; border-bottom: 1px solid var(--line); }
 .resource-tabs button { display: inline-flex; align-items: center; gap: 8px; margin-bottom: -1px; padding: 9px 2px 11px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .resource-tabs button.active { border-bottom-color: var(--accent); color: var(--ink); }
 .resource-tabs button span { font-size: 14px; color: var(--muted); }
 .resource-summary { min-height: min(64vh, 680px); padding: 18px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-.resource-summary-text { max-height: min(66vh, 720px); overflow: auto; overflow-wrap: anywhere; font-size: 20px; line-height: 1.65; }
+.resource-summary-text { overflow-wrap: anywhere; font-size: 20px; line-height: 1.65; }
 .resource-summary-text > :first-child, .topic-summary-text > :first-child { margin-top: 0; }
 .resource-summary-text > :last-child, .topic-summary-text > :last-child { margin-bottom: 0; }
 .resource-summary-text li, .topic-summary-text li { margin-block: 5px; }
@@ -89,7 +90,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .resource-summary-state { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .resource-summary-empty { min-height: 220px; display: grid; align-content: center; justify-items: start; gap: 10px; color: var(--muted); }
 .resource-caption { margin: -8px 0 14px; color: var(--muted); font-size: 16px; }
-.resource-extracted { max-height: min(73vh, 800px); overflow: auto; margin: 0; padding: 18px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: 16px/1.6 ui-monospace, SFMono-Regular, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.resource-extracted { margin: 0; padding: 18px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: 16px/1.6 ui-monospace, SFMono-Regular, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .topic-edit { display: flex; align-items: center; flex: 1; gap: 6px; }
 .topic-edit input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
 .topic-open { display: inline-flex; align-items: center; flex: 1; min-width: 0; gap: 11px; padding: 5px 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
@@ -103,7 +104,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .link-picker select { max-width: min(54vw, 390px); min-width: 160px; border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; background: var(--paper); color: var(--ink); }
 .link-picker .button { padding: 5px 10px; font-size: 16px; }
 .topic-summary-panel, .topic-resources-panel { min-height: min(64vh, 680px); padding: 18px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-.topic-summary-text { max-height: min(58vh, 620px); overflow: auto; overflow-wrap: anywhere; font-size: 20px; line-height: 1.65; }
+.topic-summary-text { overflow-wrap: anywhere; font-size: 20px; line-height: 1.65; }
+.suggestion-source { margin: 3px 0 0; color: var(--muted); font-size: 15px; }
 .topic-summary-text mjx-container[display] { max-width: 100%; overflow: auto hidden; }
 .topic-stale-note { margin: -5px 0 14px; color: var(--muted); font-size: 15px; }
 .topic-summary-editor { display: block; width: 100%; min-height: min(54vh, 550px); resize: vertical; border: 1px solid var(--line); border-radius: 5px; padding: 14px; background: var(--paper); color: var(--ink); font: inherit; font-size: 20px; line-height: 1.65; }

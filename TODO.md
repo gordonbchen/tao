@@ -11,3 +11,4 @@
 - [x] Update AGENTS.md, README.md, and content-model docs; run checks, Docker rebuild, and end-to-end local tests.
 - [x] Render resource and topic summaries as Markdown with MathJax, and keep the answer and chat cards compact.
 - [x] Remove the empty Help and Settings header controls; have Codex suggest topics from resource content, with a heading fallback.
+- [x] Allow several resource files per selection and queue suggestions; use one vertical scroll area in summary viewers.

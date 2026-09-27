@@ -40,7 +40,9 @@ function SubjectContent() {
   const [editingTopic, setEditingTopic] = useState<string | null>(null);
   const [editedName, setEditedName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [suggestions, setSuggestions] = useState<{ resource: Resource; topics: string[] } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState("");
+  const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: string[] }[]>([]);
+  const suggestions = suggestionQueue[0] ?? null;
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
   const [resourceTab, setResourceTab] = useState<"summary" | "extracted">("summary");
@@ -128,27 +130,39 @@ function SubjectContent() {
     });
   }
 
-  async function uploadFile(file?: File) {
-    if (!file) return;
+  async function uploadFiles(fileList: FileList | null) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) return;
     setBusy(true);
     setError("");
+    const uploaded: Resource[] = [];
+    const failed: string[] = [];
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const resource = await api<Resource>(`/api/subjects/${id}/resources`, { method: "POST", headers: getAiRequestHeaders(), body: form });
-      await refresh();
-      if (resource.suggestedTopics?.length) setSuggestions({ resource, topics: resource.suggestedTopics });
-      if (resource.extractionStatus !== "empty" && aiSettings.ready && aiSettings.configured) {
-        setResources((current) => current.map((item) => item.id === resource.id ? { ...item, summaryStatus: "pending" } : item));
-        void generateResourceSummary(resource.id);
-      } else if (resource.extractionStatus !== "empty" && aiSettings.ready) {
-        notifyAiSetupRequired();
+      for (const [index, file] of files.entries()) {
+        setUploadProgress(`Adding ${index + 1} of ${files.length}…`);
+        try {
+          const form = new FormData();
+          form.append("file", file);
+          const resource = await api<Resource>(`/api/subjects/${id}/resources`, { method: "POST", headers: getAiRequestHeaders(), body: form });
+          uploaded.push(resource);
+          if (resource.suggestedTopics?.length) setSuggestionQueue((current) => [...current, { resource, topics: resource.suggestedTopics! }]);
+          await refresh();
+        } catch (e) {
+          failed.push(`${file.name}: ${e instanceof Error ? e.message : "Upload failed"}`);
+        }
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setBusy(false);
+      setUploadProgress("");
       if (fileRef.current) fileRef.current.value = "";
+    }
+    if (failed.length) setError(failed.join("\n"));
+    if (aiSettings.ready && aiSettings.configured) {
+      void (async () => {
+        for (const resource of uploaded.filter((item) => item.extractionStatus !== "empty")) await generateResourceSummary(resource.id);
+      })();
+    } else if (uploaded.some((item) => item.extractionStatus !== "empty") && aiSettings.ready) {
+      notifyAiSetupRequired();
     }
   }
 
@@ -276,7 +290,11 @@ function SubjectContent() {
       const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
       await api(`/api/topics/${topic.id}/resources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceId: sourceResource.id }) });
       setResources((current) => current.map((resource) => resource.id === sourceResource.id ? { ...resource, topicIds: [...new Set([...(resource.topicIds ?? []), topic.id])] } : resource));
-      setSuggestions((current) => current && ({ ...current, topics: current.topics.filter((topic) => topic !== name) }));
+      setSuggestionQueue((current) => {
+        if (!current.length || current[0].resource.id !== sourceResource.id) return current;
+        const remaining = current[0].topics.filter((topic) => topic !== name);
+        return remaining.length ? [{ ...current[0], topics: remaining }, ...current.slice(1)] : current.slice(1);
+      });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add topic");
@@ -306,13 +324,13 @@ function SubjectContent() {
       </section>
 
       <section className="simple-section">
-        <div className="section-title-row"><h2>Resources</h2><button className="button" type="button" onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />Add</button></div>
-        <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" hidden onChange={e => uploadFile(e.target.files?.[0])} />
+        <div className="section-title-row"><h2>Resources</h2><button className="button" type="button" onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</button></div>
+        <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple hidden onChange={e => void uploadFiles(e.currentTarget.files)} />
         {resources.length > 0 && <ul className="simple-list resource-list">{resources.map((resource) => <li key={resource.id}><FileText size={18} /><button className="resource-open" type="button" onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text">{resource.filename}</button><button className="icon-action" aria-label={`Remove ${resource.filename}`} title="Remove resource" onClick={() => removeResource(resource)}><Trash2 size={18} /></button></li>)}</ul>}
       </section>
     </>}
 
-    {suggestions && suggestions.topics.length > 0 && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSuggestions(null); }}><div className="modal"><div className="modal-head"><h2>Suggested topics</h2><button className="modal-close" aria-label="Close" onClick={() => setSuggestions(null)}>×</button></div><ul className="simple-list">{suggestions.topics.map((topic) => <li key={topic}><span>{topic}</span><button className="button" onClick={() => addSuggestedTopic(topic)}><Plus size={18} />Add</button></li>)}</ul><div className="modal-actions"><button className="button" onClick={() => setSuggestions(null)}>Done</button></div></div></div>}
+    {suggestions && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSuggestionQueue((current) => current.slice(1)); }}><div className="modal"><div className="modal-head"><div><h2>Suggested topics</h2><p className="suggestion-source">{suggestions.resource.filename}</p></div><button className="modal-close" aria-label="Close" onClick={() => setSuggestionQueue((current) => current.slice(1))}>×</button></div><ul className="simple-list">{suggestions.topics.map((topic) => <li key={topic}><span>{topic}</span><button className="button" onClick={() => addSuggestedTopic(topic)}><Plus size={18} />Add</button></li>)}</ul><div className="modal-actions"><button className="button" onClick={() => setSuggestionQueue((current) => current.slice(1))}>{suggestionQueue.length > 1 ? "Next resource" : "Done"}</button></div></div></div>}
     {resourceText && <div className="modal-backdrop resource-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setResourceText(null); }}><div className="modal resource-modal" role="dialog" aria-modal="true" aria-label={`Summary and extracted text from ${resourceText.filename}`}>
       <div className="modal-head"><h2>{resourceText.filename}</h2><button className="modal-close" aria-label="Close" onClick={() => setResourceText(null)}><X size={19} /></button></div>
       <div className="content-links"><span>Topics</span>{resourceText.topics.map((topic) => <span className="content-link-chip" key={topic.id}>{topic.name}<button type="button" className="icon-action" title={`Unlink ${topic.name}`} aria-label={`Unlink ${topic.name}`} onClick={() => void unlinkResource(topic.id, resourceText.id)}><Unlink size={14} /></button></span>)}
