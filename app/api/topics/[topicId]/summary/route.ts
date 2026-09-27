@@ -28,6 +28,6 @@ export async function POST(request: Request, { params }: RouteContext) {
     const message = error instanceof Error ? error.message : "Could not summarize this topic";
     const noProvider = /(codex|claude) is (unavailable|not signed in)/i.test(message);
     await query("UPDATE topics SET summary_status = $2 WHERE id = $1", [topicId, noProvider ? "not_generated" : "failed"]);
-    return jsonError(noProvider ? "Connect a local Codex or Claude sidecar to create a topic summary." : message, noProvider ? 503 : 502);
+    return jsonError(noProvider ? "Sign in to Codex or Claude to create a topic summary." : message, noProvider ? 503 : 502);
   }
 }

@@ -29,60 +29,60 @@ type Context = {
 };
 
 export const AI_PROVIDERS = {
-  codex: { label: "Codex", socket: "/run/tao-codex/socket", profile: "local-codex", models: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"], defaultModel: process.env.CODEX_MODEL },
-  claude: { label: "Claude", socket: "/run/tao-claude/socket", profile: "local-claude", models: ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5"], defaultModel: process.env.CLAUDE_MODEL },
-} satisfies Record<AiProvider, { label: string; socket: string; profile: string; models: string[]; defaultModel?: string }>;
+  codex: { label: "Codex", socket: "/run/tao-codex/socket", models: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"], defaultModel: process.env.CODEX_MODEL },
+  claude: { label: "Claude", socket: "/run/tao-claude/socket", models: ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5"], defaultModel: process.env.CLAUDE_MODEL },
+} satisfies Record<AiProvider, { label: string; socket: string; models: string[]; defaultModel?: string }>;
 
-function connectedProviders() {
-  return (Object.keys(AI_PROVIDERS) as AiProvider[]).filter(provider => existsSync(AI_PROVIDERS[provider].socket));
+export function isAiProvider(value: unknown): value is AiProvider {
+  return typeof value === "string" && Object.hasOwn(AI_PROVIDERS, value);
+}
+
+export function defaultModelFor(provider: AiProvider) {
+  const { models, defaultModel } = AI_PROVIDERS[provider];
+  return defaultModel && models.includes(defaultModel) ? defaultModel : models[0];
 }
 
 function unavailableMessage(provider: AiProvider) {
-  const { label, profile } = AI_PROVIDERS[provider];
-  return `${label} is unavailable. Start the ${profile} Docker profile and sign in to ${label}.`;
+  return `${AI_PROVIDERS[provider].label} is unavailable. Start Tao with Docker Compose and sign in from the header.`;
 }
 
 function selectedModel(requested?: string): { provider: AiProvider; model: string } {
   const requestedProvider = (Object.keys(AI_PROVIDERS) as AiProvider[]).find(provider => requested && AI_PROVIDERS[provider].models.includes(requested));
   if (requestedProvider) return { provider: requestedProvider, model: requested! };
-  const provider = connectedProviders()[0] ?? "codex";
-  const { models, defaultModel } = AI_PROVIDERS[provider];
-  return { provider, model: defaultModel && models.includes(defaultModel) ? defaultModel : models[0] };
+  const provider = (Object.keys(AI_PROVIDERS) as AiProvider[]).find(id => existsSync(AI_PROVIDERS[id].socket)) ?? "codex";
+  return { provider, model: defaultModelFor(provider) };
 }
 
-async function bridgeJson<T>(provider: AiProvider, kind: string, model: string, system: string, input: string): Promise<T> {
-  const { label, socket } = AI_PROVIDERS[provider];
+// Sends one JSON request to a sidecar over its Unix socket.
+export function callBridge<T>(provider: AiProvider, method: "GET" | "POST", path: string, body?: unknown, timeout = 190_000): Promise<T> {
+  const { label } = AI_PROVIDERS[provider];
   return new Promise((resolve, reject) => {
-    const request = httpRequest({ socketPath: socket, path: "/infer", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 190_000 }, response => {
-      let body = "";
+    const request = httpRequest({ socketPath: AI_PROVIDERS[provider].socket, path, method, headers: { "Content-Type": "application/json" }, timeout }, response => {
+      let text = "";
       response.setEncoding("utf8");
-      response.on("data", chunk => { body += chunk; if (body.length > 64_000) request.destroy(new Error(`${label} response too large`)); });
+      response.on("data", chunk => { text += chunk; if (text.length > 64_000) request.destroy(new Error(`${label} response too large`)); });
       response.on("end", () => {
         try {
-          const parsed = JSON.parse(body);
+          const parsed = JSON.parse(text);
           if (response.statusCode !== 200) return reject(new Error(parsed.error || `${label} request failed`));
           resolve(parsed as T);
         } catch { reject(new Error(`${label} returned invalid JSON`)); }
       });
     });
     request.on("timeout", () => request.destroy(new Error(`${label} request timed out`)));
-    request.on("error", () => reject(new Error(unavailableMessage(provider))));
-    request.end(JSON.stringify({ kind, system, input, model }));
+    request.on("error", error => reject(error.message.includes(label) ? error : new Error(unavailableMessage(provider))));
+    request.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
 
-export function defaultAiModel() {
-  return selectedModel().model;
-}
-
 export function hasAiProvider() {
-  return connectedProviders().length > 0;
+  return (Object.keys(AI_PROVIDERS) as AiProvider[]).some(provider => existsSync(AI_PROVIDERS[provider].socket));
 }
 
 async function jsonFromConfiguredProvider<T>(system: string, input: string, kind: string, options: AiOptions = {}): Promise<{ value: T; provider: AiProvider; model: string }> {
   const { provider, model } = selectedModel(options.model);
   if (!existsSync(AI_PROVIDERS[provider].socket)) throw new Error(unavailableMessage(provider));
-  return { value: await bridgeJson<T>(provider, kind, model, system, input), provider, model };
+  return { value: await callBridge<T>(provider, "POST", "/infer", { kind, system, input, model }), provider, model };
 }
 
 export async function generateProblem(context: Context, options: AiOptions = {}): Promise<GeneratedProblem> {

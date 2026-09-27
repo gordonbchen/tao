@@ -48,12 +48,11 @@ services:
       dockerfile: Dockerfile.codex
       network: host
     network_mode: host
-    profiles: ["local-codex"]
     environment:
       CODEX_HOME: /codex-auth
       CODEX_MODEL: ${CODEX_MODEL:-}
     volumes:
-      - ${CODEX_AUTH_DIR:-./.codex-tao}:/codex-auth
+      - ${CODEX_AUTH_DIR:-codex_auth}:/codex-auth
       - codex_socket:/run/tao-codex
 
   claude:
@@ -62,12 +61,11 @@ services:
       dockerfile: Dockerfile.claude
       network: host
     network_mode: host
-    profiles: ["local-claude"]
     environment:
       CLAUDE_CONFIG_DIR: /claude-auth
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
     volumes:
-      - ${CLAUDE_AUTH_DIR:-./.claude-tao}:/claude-auth
+      - ${CLAUDE_AUTH_DIR:-claude_auth}:/claude-auth
       - claude_socket:/run/tao-claude
 
 volumes:
@@ -76,3 +74,5 @@ volumes:
   uploads:
   codex_socket:
   claude_socket:
+  codex_auth:
+  claude_auth:

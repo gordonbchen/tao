@@ -9,18 +9,17 @@ This prototype has one shared local demo workspace and no sign-in. Run it only o
 
 ## Local development
 
-Use Docker with Compose. Git is needed to clone the repository. The Codex CLI or Claude Code CLI is needed on the host only to create a login for AI features; Node.js and npm are already in the Docker images. Run these commands from the repository root in a POSIX shell:
+Use Docker with Compose. Git is needed to clone the repository; Node.js, npm, and the Codex and Claude CLIs are already in the Docker images. From the repository root, run:
 
 ```bash
-cp -n .env.example .env
-mkdir -p .codex-tao
-CODEX_HOME="$PWD/.codex-tao" codex login
 docker compose -f compose.portable.yaml up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). `compose.portable.yaml` uses a standard Docker network and publishes only the web app on local port 3000. It starts PostgreSQL, the web app, and the AI sidecars enabled by `.env`. To use Claude instead of (or alongside) Codex, see [Claude Code CLI backend](#claude-code-cli-backend). Database migrations run automatically when the app first queries the database. Data and uploads live in named Docker volumes. Source files under `app/`, `lib/`, and `db/` are mounted for development.
+Then open Tao and press **Connect AI** in the header to sign in to Codex (ChatGPT) or Claude with your own subscription. Codex shows a link and a one-time code; Claude shows a link, then asks you to paste the code from its sign-in page. The key button in the header reopens this dialog to sign in to the other provider or sign out. No `.env` file is needed; `.env.example` lists optional settings.
 
-To browse Tao before signing in to an AI CLI, leave `COMPOSE_PROFILES` unset in `.env` or omit `.env` and start Compose. You can then organize subjects and inspect extracted text; summaries and practice need Codex or Claude.
+Open [http://localhost:3000](http://localhost:3000). `compose.portable.yaml` uses a standard Docker network and publishes only the web app on local port 3000. It starts PostgreSQL, the web app, and the Codex and Claude sidecars. Logins are stored in the `codex_auth` and `claude_auth` Docker volumes. Database migrations run automatically when the app first queries the database. Data and uploads live in named Docker volumes. Source files under `app/`, `lib/`, and `db/` are mounted for development.
+
+Before signing in, you can organize subjects and inspect extracted text; summaries and practice need Codex or Claude.
 
 This workspace also has `compose.yaml`, a Linux host-network variant because its Docker environment cannot create bridge interfaces. On that machine, run `docker compose up --build` instead. Both variants use the same app and database schema. Use the same `-f compose.portable.yaml` flag with later `ps`, `logs`, `exec`, and `down` commands when you started the portable variant.
 
@@ -28,7 +27,7 @@ This workspace also has `compose.yaml`, a Linux host-network variant because its
 
 1. Create a subject such as **Analysis**.
 2. Add a covered topic, such as **Convergent sequences**. Select one or several `.txt`, `.md`, or text-based `.pdf` resources in the file picker. Tao uploads each file and queues its topic suggestions for review. If Codex is unavailable, Tao uses headings as a fallback. Click a resource to see its model summary and extracted text. Click a topic, open **Resources**, and click rows to add or remove resources. The available list filters as you type. Labels show **Saved**, **To add**, and **To remove** before you press **Save** to update links and regenerate the topic summary once. The summary remains editable.
-3. Check the model selector in the header for the Codex or Claude connection. Each local CLI sidecar uses its own login. The selector lists models from every connected sidecar; the chosen model decides which one handles requests.
+3. Sign in with **Connect AI** in the header if you have not already. The model selector lists models from every signed-in provider; the chosen model decides which one handles requests.
 4. Use the topic selector beneath the subject name, then press **Practice**. Tao chooses a problem level from earlier attempts and opens one problem. Without Codex connected, Tao shows a setup notice instead of generating a demo prompt.
 5. Ask for a hint, write an answer, choose how difficult it felt, and submit. TeX typed in the answer box appears in a preview. You can skip a question or give feedback about its quality; skipping leaves review state unchanged. Reveal the reference solution after checking your answer. Return to the subject page to see updated review state.
 
@@ -38,31 +37,15 @@ To stop the portable setup, press Ctrl-C or run `docker compose -f compose.porta
 
 Without Codex or Claude connected, you can organize subjects and inspect extracted resource text, but summaries and practice are unavailable. Keep your Codex and Claude login files out of source control.
 
-### Codex CLI backend
+### AI backends
 
-Codex CLI runs on your machine in a separate Docker container but calls OpenAI models through your Codex login. It is **not** an offline or unlimited free model. It can use ChatGPT sign-in or API-key sign-in, depending on how you logged into Codex. The sidecar has its own login directory and communicates with the web app through a Unix socket; it does not mount the app's database or uploads. This mode is for the single-user local prototype only.
+Both backends run a CLI on your machine in its own Docker container, and each calls hosted models through your login. Neither is offline or unlimited: Codex uses OpenAI models through ChatGPT or API-key sign-in, and Claude uses Anthropic models through a Claude subscription or Console sign-in. Each sidecar mounts only its own login volume and talks to the web app through its own Unix socket; neither mounts the app's database or uploads. Claude runs `claude -p` with tools, MCP servers, settings files, and session persistence disabled. This setup is for the single-user local prototype only: anyone who can open the app can sign these accounts in or out.
 
-With Codex CLI installed on your host, create a separate login for Tao if you have not already done so in the quick start:
+`CODEX_MODEL` and `CLAUDE_MODEL` set default models (`gpt-6-luna`, `claude-sonnet-5`). Choose another in the header. Some Claude models may need extra usage credits on your plan; Tao shows the CLI's message when a request is refused. Claude CLI does not expose remaining allowance, so the usage bar shows it as unavailable while a Claude model is selected. The first problem can take a while because each inference call starts a fresh CLI process.
 
-```bash
-mkdir -p .codex-tao
-CODEX_HOME="$PWD/.codex-tao" codex login
-```
+To reuse an existing host login instead of signing in through Tao, set `CODEX_AUTH_DIR` (usually `$HOME/.codex`) or `CLAUDE_AUTH_DIR` in `.env`. This gives the sidecar access to those login files.
 
-Copy `.env.example` to `.env`; it enables the `local-codex` Compose profile and defaults to `gpt-6-luna`. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. Choose a model in Tao's header. The first problem can take a while because the sidecar starts a fresh Codex CLI process for each inference call.
-
-Uploaded text and a model-generated summary are stored with each resource. Codex suggests topics from sampled content across the uploaded text; if it is unavailable, headings and the filename provide a fallback. Topics store editable coverage summaries and explicit resource links; accepting a suggested topic links its source resource. Resource summaries process extracted text in sections. For a new problem, Codex receives the subject, topic, selected difficulty, topic summary, linked excerpts, recent prompts, and recent student feedback. Older topics without links temporarily use relevant subject resources. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
-
-### Claude Code CLI backend
-
-The Claude sidecar works the same way: it runs `claude -p` in its own container with only its login directory mounted, and talks to the web app over a separate Unix socket. It calls hosted Anthropic models through your Claude subscription or Console login, so it is not offline and counts against your usage limits. Tools, MCP servers, settings files, and session persistence are disabled for each call.
-
-```bash
-mkdir -p .claude-tao
-CLAUDE_CONFIG_DIR="$PWD/.claude-tao" claude auth login
-```
-
-Add `local-claude` to `COMPOSE_PROFILES` in `.env` (for example `COMPOSE_PROFILES=local-codex,local-claude`, or only `local-claude`), then start Compose with `--build`. `CLAUDE_MODEL` sets the default model (`claude-sonnet-5`); the header also offers `claude-opus-5-5`, `claude-fable-5-1`, and `claude-haiku-4-5`. Some models may need extra usage credits on your plan; Tao shows the CLI's message when a request is refused. Claude CLI does not expose remaining allowance, so the usage bar shows it as unavailable while a Claude model is selected.
+Uploaded text and a model-generated summary are stored with each resource. The selected model suggests topics from sampled content across the uploaded text; if it is unavailable, headings and the filename provide a fallback. Topics store editable coverage summaries and explicit resource links; accepting a suggested topic links its source resource. Resource summaries process extracted text in sections. For a new problem, the model receives the subject, topic, selected difficulty, topic summary, linked excerpts, recent prompts, and recent student feedback. Older topics without links temporarily use relevant subject resources. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
 
 ## Checks and troubleshooting
 
@@ -76,7 +59,7 @@ docker compose -f compose.portable.yaml exec web npm run lint
 docker compose -f compose.portable.yaml exec web npm test
 ```
 
-The database should report healthy. If Codex is unavailable, check that `.env` contains `COMPOSE_PROFILES=local-codex`, that `CODEX_AUTH_DIR` points to the directory used for `codex login`, and that the `codex` container is running. For Claude, check for `local-claude` in `COMPOSE_PROFILES`, `CLAUDE_AUTH_DIR`, and the `claude` container. If port 3000 is occupied, change the host-side `127.0.0.1:3000:3000` mapping in `compose.portable.yaml` and open that port in the browser. The setup commands above use POSIX shell syntax; on Windows, use WSL or translate the environment-variable assignment for your shell.
+The database should report healthy. If the AI accounts dialog says a sidecar is not running, check the `codex` or `claude` container logs. If sign-in keeps failing, press **Restart** in the dialog to get a fresh link and code. If port 3000 is occupied, change the host-side `127.0.0.1:3000:3000` mapping in `compose.portable.yaml` and open that port in the browser. The setup commands above use POSIX shell syntax; on Windows, use WSL or translate the environment-variable assignment for your shell.
 
 For checks outside Docker, install Node.js 22 and run `npm ci`, then:
 

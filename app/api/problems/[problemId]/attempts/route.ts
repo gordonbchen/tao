@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   const problem = problemResult.rows[0];
   if (!problem) return jsonError("Problem not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
-  if (!hasAiProvider()) return jsonError("Start the local Codex or Claude sidecar before checking answers", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before checking answers", 409);
   let checked: { feedback: string; correctness: Correctness };
   try { checked = await checkAnswer(problem, answer, aiOptions); }
   catch { return jsonError("The tutor could not check this answer. Check the configured AI provider or try again.", 502); }

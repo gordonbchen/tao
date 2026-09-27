@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const message = error instanceof Error ? error.message : "Could not summarize this resource";
     const noProvider = /(codex|claude) is (unavailable|not signed in)/i.test(message);
     await query(`UPDATE resources SET summary_status = $3 WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID, noProvider ? "not_generated" : "failed"]);
-    return jsonError(noProvider ? "Connect a local Codex or Claude sidecar to create a resource summary." : message, noProvider ? 503 : 502);
+    return jsonError(noProvider ? "Sign in to Codex or Claude to create a resource summary." : message, noProvider ? 503 : 502);
   }
 }
 

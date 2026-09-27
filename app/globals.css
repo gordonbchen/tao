@@ -38,7 +38,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .usage-meter strong { font-size: 15px; font-weight: 600; text-align: right; }
 .usage-track { height: 9px; overflow: hidden; border-radius: 99px; background: var(--line); }
 .usage-track > div { height: 100%; border-radius: inherit; background: #2f9a5b; transition: width .3s ease; }
-.ai-notice { position: fixed; z-index: 65; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 12px 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 8px 28px #0002; }
+.header-actions button.model-control { border: 1px solid var(--line); padding: 6px 12px; font: inherit; font-size: 16px; }
+.accounts-note { margin: -6px 0 16px; color: var(--muted); font-size: 16px; }
+.simple-list li.account-row { flex-wrap: wrap; justify-content: space-between; }
+.account-row > div:first-child { display: grid; gap: 2px; }
+.account-row > div:first-child span { color: var(--muted); font-size: 15px; }
+.account-signin { flex-basis: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 16px; }
+.account-signin p { margin: 0; line-height: 1.7; }
+.account-signin a { color: var(--accent); text-decoration: underline; }
+.account-signin code { padding: 2px 7px; border-radius: 4px; background: var(--accent-soft); font-size: 18px; letter-spacing: .06em; user-select: all; }
+.account-signin form { display: flex; gap: 8px; margin-top: 8px; }
+.account-signin input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); font-size: 16px; }
+.account-wait { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .content { width: min(100% - 48px, 900px); margin: 44px auto 80px; }
 .home-heading, .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .section-title-row { margin-bottom: 14px; }

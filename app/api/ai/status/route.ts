@@ -1,22 +1,12 @@
-import { request as httpRequest } from "node:http";
-import { AI_PROVIDERS, defaultAiModel, type AiProvider } from "@/lib/ai";
+import { AI_PROVIDERS, callBridge, defaultModelFor, type AiProvider } from "@/lib/ai";
 
-function bridgeAvailable(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const request = httpRequest({ socketPath, path: "/health", method: "GET", timeout: 1500 }, response => {
-      response.resume();
-      resolve(response.statusCode === 200);
-    });
-    request.on("timeout", () => request.destroy());
-    request.on("error", () => resolve(false));
-    request.end();
-  });
-}
+type Health = { signedIn: boolean; signingIn: boolean };
 
 export async function GET() {
-  const providers = Object.keys(AI_PROVIDERS) as AiProvider[];
-  const available = await Promise.all(providers.map(provider => bridgeAvailable(AI_PROVIDERS[provider].socket)));
-  const models = providers.filter((_, index) => available[index])
-    .flatMap(provider => AI_PROVIDERS[provider].models.map(id => ({ id, provider: AI_PROVIDERS[provider].label })));
-  return Response.json({ available: models.length > 0, models, defaultModel: defaultAiModel() });
+  const ids = Object.keys(AI_PROVIDERS) as AiProvider[];
+  const health = await Promise.all(ids.map(id => callBridge<Health>(id, "GET", "/health", undefined, 20_000).catch(() => null)));
+  const providers = ids.map((id, index) => ({ id, label: AI_PROVIDERS[id].label, running: health[index] !== null, signedIn: health[index]?.signedIn === true }));
+  const ready = providers.filter(provider => provider.signedIn);
+  const models = ready.flatMap(provider => AI_PROVIDERS[provider.id].models.map(model => ({ id: model, provider: provider.label })));
+  return Response.json({ available: models.length > 0, providers, models, defaultModel: ready.length ? defaultModelFor(ready[0].id) : "" });
 }

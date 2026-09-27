@@ -70,7 +70,7 @@ function StudyContent() {
     if (!ai.ready) return;
     if (!ai.configured) {
       setGenerating(false);
-      setError("Connect a local Codex or Claude sidecar to practice.");
+      setError("Sign in to Codex or Claude to practice.");
       notifyAiSetupRequired();
       return;
     }
@@ -101,7 +101,7 @@ function StudyContent() {
     if (!subjectLoaded || loading || !ai.ready || !topics.length || autoStarted.current) return;
     if (!ai.configured) {
       setGenerating(false);
-      setError("Connect a local Codex or Claude sidecar to practice.");
+      setError("Sign in to Codex or Claude to practice.");
       return;
     }
     autoStarted.current = true;
@@ -110,7 +110,7 @@ function StudyContent() {
 
   async function askTutor(e?: React.FormEvent, suggested?: string) {
     e?.preventDefault(); const content = (suggested ?? chatText).trim(); if (!content || !problem || chatBusy) return;
-    if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Connect a local Codex or Claude sidecar to continue."); return; }
+    if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Sign in to Codex or Claude to continue."); return; }
     setChatText(""); setMessages(items => [...items, { role: "user", text: content }]); setChatBusy(true);
     try {
       const result = await api<{ hint: string; index?: number }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ message: content }) });
@@ -121,7 +121,7 @@ function StudyContent() {
 
   async function submitAttempt(e: React.FormEvent) {
     e.preventDefault(); if (!problem || !answer.trim()) return;
-    if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Connect a local Codex or Claude sidecar to continue."); return; }
+    if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Sign in to Codex or Claude to continue."); return; }
     setWorking(true); setError("");
     try {
       const result = await api<Feedback>(`/api/problems/${problem.id}/attempts`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ answer: answer.trim(), difficulty: rating }) });
