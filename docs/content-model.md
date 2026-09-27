@@ -2,11 +2,11 @@
 
 ## Current state
 
-Tao stores an uploaded file and its extracted text on the resource. Topic records contain a name, a coverage flag, and review scheduling data. Upload suggestions are deterministic headings. No resource or topic summary exists yet. Problem generation currently selects up to three relevant resource excerpts.
+Tao stores an uploaded file, its extracted text, and a model summary on the resource. The summary is generated from the full extracted text in sections when an AI provider is configured, and stores its provider, model, and status. Students can view summary and extraction in separate tabs. Topic records contain a name, a coverage flag, and review scheduling data. Upload suggestions are deterministic headings; topic summaries and evidence links are still planned. Problem generation currently selects up to three relevant resource excerpts.
 
 ## Planned records
 
-- **Resource:** original file, extracted text, extraction status, a reviewable summary of definitions, results, examples, and boundaries covered in that file. Keep the extraction and summary separate so the student can inspect errors. Record the provider, model, source revision, and summary status.
+- **Resource:** original file, extracted text, extraction status, and a reviewable summary of definitions, results, examples, and boundaries covered in that file. Extraction and summary, provider, model, and summary status are implemented. Source revision tracking and student editing of summaries remain planned.
 - **Topic:** name, editable confirmed coverage text, and an AI-proposed coverage draft. Keep student edits separate from generated drafts. A topic may draw on many resources.
 - **Topic evidence:** a many-to-many link between a topic and a resource, with the specific page or text span, optional note, and status. Permit several distinct evidence passages from the same resource for one topic. Repeating an attach action should find new relevant passages or refresh a draft; it should not duplicate identical evidence.
 - **Subject overview:** derive it from confirmed topics and their evidence, rather than maintaining another independent AI summary.

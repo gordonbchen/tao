@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
-import { api, AppShell, LoadingCard, Subject } from "./components";
+import { Plus, Trash2, X } from "lucide-react";
+import { api, AppShell, LoadingCard, scheduleUndoDelete, Subject } from "./components";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -39,10 +39,19 @@ export default function DashboardPage() {
     }
   }
 
+  function removeSubject(subject: Subject) {
+    setSubjects(current => current.filter(item => item.id !== subject.id));
+    scheduleUndoDelete(subject.id, {
+      message: `Removed ${subject.name}`,
+      restore: () => setSubjects(current => current.some(item => item.id === subject.id) ? current : [...current, subject]),
+      commit: () => api(`/api/subjects/${subject.id}`, { method: "DELETE" }).then(() => {}),
+    });
+  }
+
   return <AppShell><main className="content home-content">
     <div className="home-heading"><h1>Subjects</h1><button className="button button-primary" onClick={() => setShowCreate(true)}><Plus size={19} />New subject</button></div>
     {error && !showCreate && <div className="error-message">{error}</div>}
-    {loading ? <LoadingCard /> : <div className="subjects-list">{subjects.map((subject) => <Link className="subject-link" href={`/subjects/${subject.id}`} key={subject.id}>{subject.name}</Link>)}</div>}
+    {loading ? <LoadingCard /> : <div className="subjects-list">{subjects.map((subject) => <div className="subject-row" key={subject.id}><Link className="subject-link" href={`/subjects/${subject.id}`}>{subject.name}</Link><button className="subject-remove" type="button" aria-label={`Remove ${subject.name}`} title={`Remove ${subject.name}`} onClick={() => removeSubject(subject)}><Trash2 size={19} /></button></div>)}</div>}
     {!loading && subjects.length === 0 && !error && <p className="quiet-empty">No subjects yet.</p>}
 
     {showCreate && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}><form className="modal" onSubmit={createSubject}>

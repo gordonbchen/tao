@@ -4,15 +4,28 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, FileText, Pencil, Plus, Trash2, X, Check } from "lucide-react";
-import { api, AppShell, isPendingRemoval, LoadingCard, scheduleUndoDelete, Subject } from "../../components";
+import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
+import { MathText } from "../../math-text";
 
 type Topic = { id: string; name: string };
-type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; suggestedTopics?: string[] };
-type ResourceText = Resource & { extractedText: string };
+type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; suggestedTopics?: string[] };
+type ResourceText = Resource & {
+  extractedText: string;
+  modelSummary: string;
+  summaryStatus: "not_generated" | "pending" | "complete" | "failed";
+  summaryProvider?: string | null;
+  summaryModel?: string | null;
+};
+const resourceSummariesInProgress = new Set<string>();
 
 export default function SubjectPage() {
+  return <AppShell><SubjectContent /></AppShell>;
+}
+
+function SubjectContent() {
   const { subjectId: id } = useParams<{ subjectId: string }>();
   const router = useRouter();
+  const aiSettings = useAISettings();
   const [subject, setSubject] = useState<Subject | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -26,6 +39,9 @@ export default function SubjectPage() {
   const [suggestions, setSuggestions] = useState<{ resource: Resource; topics: string[] } | null>(null);
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
+  const [resourceTab, setResourceTab] = useState<"summary" | "extracted">("summary");
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -111,6 +127,12 @@ export default function SubjectPage() {
       const resource = await api<Resource>(`/api/subjects/${id}/resources`, { method: "POST", body: form });
       await refresh();
       if (resource.suggestedTopics?.length) setSuggestions({ resource, topics: resource.suggestedTopics });
+      if (resource.extractionStatus !== "empty" && aiSettings.ready && aiSettings.configured) {
+        setResources((current) => current.map((item) => item.id === resource.id ? { ...item, summaryStatus: "pending" } : item));
+        void generateResourceSummary(resource.id);
+      } else if (resource.extractionStatus !== "empty" && aiSettings.ready) {
+        notifyAiSetupRequired();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -131,9 +153,42 @@ export default function SubjectPage() {
   async function showResourceText(resource: Resource) {
     setResourceTextLoading(true);
     setError("");
-    try { setResourceText(await api<ResourceText>(`/api/resources/${resource.id}`)); }
+    setSummaryError("");
+    try {
+      const detail = await api<ResourceText>(`/api/resources/${resource.id}`);
+      setResourceText(detail);
+      setResourceTab("summary");
+      if (detail.summaryStatus === "not_generated" || detail.summaryStatus === "failed") void generateResourceSummary(resource.id);
+    }
     catch (e) { setError(e instanceof Error ? e.message : "Could not load extracted text"); }
     finally { setResourceTextLoading(false); }
+  }
+
+  async function generateResourceSummary(resourceId: string) {
+    if (!aiSettings.ready) return;
+    if (!aiSettings.configured) {
+      notifyAiSetupRequired();
+      setSummaryError("Configure an AI model in Settings to create a resource summary.");
+      return;
+    }
+    if (resourceSummariesInProgress.has(resourceId)) return;
+    resourceSummariesInProgress.add(resourceId);
+    setSummaryLoading(true);
+    setSummaryError("");
+    try {
+      const detail = await api<ResourceText>(`/api/resources/${resourceId}`, { method: "POST", headers: getAiRequestHeaders() });
+      setResourceText((current) => current?.id === resourceId ? detail : current);
+      setResources((current) => current.map((item) => item.id === resourceId ? { ...item, summaryStatus: "complete" } : item));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not create a resource summary";
+      setSummaryError(message);
+      if (message.includes("Configure an AI model")) notifyAiSetupRequired();
+      setResourceText((current) => current?.id === resourceId ? { ...current, summaryStatus: message.includes("Configure an AI model") ? "not_generated" : "failed" } : current);
+      setError(message);
+    } finally {
+      resourceSummariesInProgress.delete(resourceId);
+      setSummaryLoading(false);
+    }
   }
 
   async function addSuggestedTopic(name: string) {
@@ -146,7 +201,7 @@ export default function SubjectPage() {
     }
   }
 
-  return <AppShell><main className="content subject-content">
+  return <main className="content subject-content">
     <Link href="/" className="back-link"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
       <div className="subject-heading"><h1>{subject.name}</h1>
@@ -155,7 +210,7 @@ export default function SubjectPage() {
           <select id="practice-topic" value={selectedTopic} onChange={(event) => setSelectedTopic(event.target.value)} disabled={!topics.length}>
             <option value="">Any topic</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
           </select>
-          <button className="button button-primary" disabled={!topics.length} onClick={() => router.push(`/study/${id}${selectedTopic ? `?topic=${encodeURIComponent(selectedTopic)}` : ""}`)}>Practice</button>
+          <button className="button button-primary" disabled={!topics.length || !aiSettings.ready} onClick={() => { if (!aiSettings.configured) { notifyAiSetupRequired(); return; } router.push(`/study/${id}${selectedTopic ? `?topic=${encodeURIComponent(selectedTopic)}` : ""}`); }}>Practice</button>
         </div>
       </div>
       {error && <div className="error-message">{error}</div>}
@@ -176,6 +231,22 @@ export default function SubjectPage() {
     </>}
 
     {suggestions && suggestions.topics.length > 0 && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSuggestions(null); }}><div className="modal"><div className="modal-head"><h2>Suggested topics</h2><button className="modal-close" aria-label="Close" onClick={() => setSuggestions(null)}>×</button></div><ul className="simple-list">{suggestions.topics.map((topic) => <li key={topic}><span>{topic}</span><button className="button" onClick={() => addSuggestedTopic(topic)}><Plus size={18} />Add</button></li>)}</ul><div className="modal-actions"><button className="button" onClick={() => setSuggestions(null)}>Done</button></div></div></div>}
-    {resourceText && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setResourceText(null); }}><div className="modal resource-modal" role="dialog" aria-modal="true" aria-label={`Extracted text from ${resourceText.filename}`}><div className="modal-head"><h2>{resourceText.filename}</h2><button className="modal-close" aria-label="Close" onClick={() => setResourceText(null)}><X size={19} /></button></div><p className="resource-caption">Extracted text · {resourceText.extractedText.length.toLocaleString()} characters</p>{resourceText.extractedText ? <pre className="resource-extracted">{resourceText.extractedText}</pre> : <p>No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>}</div></div>}
-  </main></AppShell>;
+    {resourceText && <div className="modal-backdrop resource-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setResourceText(null); }}><div className="modal resource-modal" role="dialog" aria-modal="true" aria-label={`Summary and extracted text from ${resourceText.filename}`}>
+      <div className="modal-head"><h2>{resourceText.filename}</h2><button className="modal-close" aria-label="Close" onClick={() => setResourceText(null)}><X size={19} /></button></div>
+      <div className="resource-tabs" role="tablist" aria-label="Resource content">
+        <button type="button" role="tab" aria-selected={resourceTab === "summary"} className={resourceTab === "summary" ? "active" : ""} onFocus={() => setResourceTab("summary")} onKeyDown={(event) => { if (event.key === "ArrowRight") { event.preventDefault(); setResourceTab("extracted"); (event.currentTarget.nextElementSibling as HTMLButtonElement | null)?.focus(); } }} onClick={() => setResourceTab("summary")}>Summary</button>
+        <button type="button" role="tab" aria-selected={resourceTab === "extracted"} className={resourceTab === "extracted" ? "active" : ""} onFocus={() => setResourceTab("extracted")} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); setResourceTab("summary"); (event.currentTarget.previousElementSibling as HTMLButtonElement | null)?.focus(); } }} onClick={() => setResourceTab("extracted")}>Extracted text <span>{resourceText.extractedText.length.toLocaleString()}</span></button>
+      </div>
+      {resourceTab === "summary" ? <section className="resource-summary" role="tabpanel" aria-label="Model summary">
+        {summaryError && <p className="error-message" role="alert">{summaryError}</p>}
+        {summaryLoading || resourceText.summaryStatus === "pending" ? <div className="resource-summary-state"><span className="spinner" /> Summarizing this resource…{!summaryLoading && <button type="button" className="button" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</button>}</div> : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
+          <p className="resource-caption">Model summary{resourceText.summaryProvider ? ` · ${resourceText.summaryProvider}${resourceText.summaryModel ? ` · ${resourceText.summaryModel}` : ""}` : ""}</p>
+          <MathText className="resource-summary-text" text={resourceText.modelSummary} />
+        </> : <div className="resource-summary-empty">
+          <p>{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
+          {resourceText.extractedText ? <button type="button" className="button" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</button> : <p>No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>}
+        </div>}
+      </section> : <section role="tabpanel" aria-label="Extracted text"><p className="resource-caption">Text extracted from this file</p>{resourceText.extractedText ? <pre className="resource-extracted">{resourceText.extractedText}</pre> : <p>No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>}</section>}
+    </div></div>}
+  </main>;
 }

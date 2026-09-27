@@ -7,10 +7,11 @@ const schemas = new Set(["problem", "feedback", "hint"]);
 mkdirSync("/run/tao-codex", { recursive: true });
 rmSync(socket, { force: true });
 
-function infer(kind, system, input) {
+function infer(kind, system, input, requestedModel) {
   return new Promise((resolve, reject) => {
     const args = ["exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--ignore-user-config", "--output-schema", `/bridge/schemas/${kind}.json`, "-"];
-    if (process.env.CODEX_MODEL) args.splice(1, 0, "--model", process.env.CODEX_MODEL);
+    const model = requestedModel || process.env.CODEX_MODEL;
+    if (model) args.splice(1, 0, "--model", model);
     const child = spawn("codex", args, { cwd: "/tmp", stdio: ["pipe", "pipe", "pipe"] });
     let output = "";
     let errors = "";
@@ -30,17 +31,64 @@ function infer(kind, system, input) {
   });
 }
 
+function accountUsage() {
+  return new Promise((resolve, reject) => {
+    const child = spawn("codex", ["app-server", "--listen", "stdio://"], { stdio: ["pipe", "pipe", "pipe"] });
+    let buffer = "";
+    let errorText = "";
+    const timer = setTimeout(() => child.kill("SIGKILL"), 12_000);
+    let finished = false;
+    const finish = (value, error) => { if (finished) return; finished = true; clearTimeout(timer); child.kill("SIGTERM"); if (error) reject(error); else resolve(value); };
+    const send = value => child.stdin.write(`${JSON.stringify(value)}\n`);
+    const onLine = line => {
+      let message;
+      try { message = JSON.parse(line); } catch { return; }
+      if (message.id === 1 && message.result) {
+        send({ method: "initialized", params: {} });
+        send({ id: 2, method: "account/rateLimits/read", params: { excludeResetCreditDetails: true } });
+        send({ id: 3, method: "account/usage/read", params: { threadId: null } });
+      }
+      if (message.id === 2 && message.result) {
+        const usage = message.id === 2 ? { rateLimits: message.result.rateLimits, rateLimitsByLimitId: message.result.rateLimitsByLimitId } : {};
+        child._taoUsage = usage;
+      }
+      if (message.id === 3 && message.result) {
+        const used = child._taoUsage?.rateLimits?.primary?.usedPercent;
+        const tokenCount = message.result.summary?.lifetimeTokens;
+        finish({ usedPercent: Number.isInteger(used) ? used : null, lifetimeTokens: Number.isFinite(tokenCount) ? tokenCount : null });
+      }
+      if (message.id && message.error) finish(null, new Error("Codex usage unavailable"));
+    };
+    child.stdout.setEncoding("utf8").on("data", chunk => {
+      buffer += chunk;
+      let end;
+      while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); onLine(line); }
+    });
+    child.stderr.setEncoding("utf8").on("data", chunk => { errorText = (errorText + chunk).slice(-2000); });
+    child.on("error", error => finish(null, error));
+    child.on("close", () => { if (!finished) finish(null, new Error(errorText || "Codex usage unavailable")); });
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "tao", title: "Tao", version: "0.1.0" }, capabilities: {} } });
+  });
+}
+
 createServer(async (request, response) => {
-  if (request.method !== "POST" || request.url !== "/infer") { response.writeHead(404).end(); return; }
+    if (request.method === "GET" && request.url === "/usage") {
+      try { response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(await accountUsage())); }
+      catch { response.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Usage unavailable" })); }
+      return;
+    }
+    if (request.method !== "POST" || request.url !== "/infer") { response.writeHead(404).end(); return; }
   try {
     let raw = "";
     for await (const chunk of request) {
       raw += chunk;
       if (raw.length > 100_000) throw new Error("Request too large");
     }
-    const { kind, system, input } = JSON.parse(raw);
-    if (!schemas.has(kind) || typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
-    const value = await infer(kind, system, input);
+    const { kind, system, input, model: requestedModel } = JSON.parse(raw);
+    if (!schemas.has(kind) && kind !== "resource_summary" && kind !== "topic_summary") throw new Error("Invalid request");
+    if (typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
+    if (requestedModel !== undefined && !["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"].includes(requestedModel)) throw new Error("Unsupported Codex model");
+    const value = await infer(kind, system, input, requestedModel);
     response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
   } catch (error) {
     response.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: error instanceof Error ? error.message : "Codex request failed" }));

@@ -3,7 +3,7 @@
 Tao is a local-first study app for course-aware practice. Add subjects and covered topics, upload notes, and practice problems selected by topic review state.
 
 The interface keeps the overview to a subject list and new-subject action. Each subject shows its topics, resources, and practice action. Text is set in the bundled Libertinus Serif font.
-The study screen renders TeX notation with locally hosted MathJax. Use `\\(...\\)` for inline math and `\\[...\\]` for display math. The header provides help, settings, a saved dark mode toggle, and a shared local profile; sign-in is not implemented yet.
+The study screen renders TeX notation with locally hosted MathJax. Use `\\(...\\)` for inline math and `\\[...\\]` for display math. The header provides model selection, usage information when the provider supplies it, help, AI settings, and a saved dark mode toggle. Sign-in is not implemented yet.
 
 This prototype has one shared local demo workspace and no sign-in. Run it only on a machine or network you trust; account separation is a future milestone. Uploaded files and study data remain in local Docker volumes.
 
@@ -20,16 +20,16 @@ Open [http://localhost:3000](http://localhost:3000). PostgreSQL and the web app 
 ### Try the prototype
 
 1. Create a subject such as **Analysis**.
-2. Add a covered topic, such as **Convergent sequences**. You can also upload or remove a `.txt`, `.md`, or text-based `.pdf` resource and review any topic suggestions before adding them. Click a resource name to inspect all of its extracted text.
-3. Use the topic selector beneath the subject name, then press **Practice**. The app chooses the problem level from earlier attempts and opens a problem immediately. With no AI configured, it uses a repeatable demonstration prompt.
-4. Ask for a hint, write an answer, choose how difficult it felt, and submit. The demo checker records the attempt as uncertain; it cannot judge your mathematics. Reveal the reference solution afterward.
-5. Return to the subject page to see its updated review state. The scheduler uses your rating and the answer check; the demo checker marks answers uncertain, so it schedules another review soon.
+2. Add a covered topic, such as **Convergent sequences**. Upload a `.txt`, `.md`, or text-based `.pdf` resource and review topic suggestions. Click its name to see the model summary and extracted text in a wide viewer. If no model is configured, the extracted text remains available and the summary can be generated later.
+3. Select an AI provider in the header's **Settings**. Codex uses the local CLI sidecar and your login; Ollama uses a local model; OpenAI API uses a key kept only in browser memory. Switch the selected model from the header.
+4. Use the topic selector beneath the subject name, then press **Practice**. Tao chooses a problem level from earlier attempts and opens one problem. Without a configured model, Tao asks you to configure one instead of generating a demo prompt.
+5. Ask for a hint, write an answer, choose how difficult it felt, and submit. TeX typed in the answer box appears in a preview. Reveal the reference solution afterward. Return to the subject page to see updated review state.
 
-The first version works with one problem at a time. It saves generated problems and attempts, but the interface does not yet offer a problem queue. Scanned or handwritten PDFs do not have OCR yet. The no-key demo uses general definition-and-example prompts; course-specific generation and AI answer feedback require Codex, Ollama, or an OpenAI key. Do not put private student records in this shared demo workspace.
+The first version works with one problem at a time. It saves generated problems and attempts, but the interface does not yet offer a problem queue. Scanned or handwritten PDFs do not have OCR yet. Course-specific generation, resource summaries, and AI feedback require Codex, Ollama, or an OpenAI key. Do not put private student records in this shared workspace.
 
 To stop the app, press Ctrl-C or run `docker compose down`. `docker compose down -v` also deletes the local database and uploads.
 
-Without an AI provider, the app uses repeatable demo problems and hints. For AI practice, configure an offline Ollama model or your local Codex CLI login. An OpenAI API key remains optional. Keep keys out of source control.
+Without an AI provider, you can organize subjects and inspect extracted resource text, but AI summaries and practice are unavailable. Configure an offline Ollama model, your local Codex CLI login, or an OpenAI API key for those actions. Keep keys out of source control.
 
 ### Optional Codex CLI backend
 
@@ -42,9 +42,9 @@ mkdir -p .codex-tao
 CODEX_HOME="$PWD/.codex-tao" codex login
 ```
 
-Copy `.env.example` to `.env` and set `AI_PROVIDER=codex` and, for a lighter model, `CODEX_MODEL=gpt-6-luna`. Set `COMPOSE_PROFILES=local-codex` if you want ordinary `docker compose up --build -d` to start the Codex sidecar automatically; otherwise use `docker compose --profile local-codex up --build -d`. Leave the OpenAI key field blank in Tao to use Codex. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. A key entered on the practice page takes precedence over Codex. The practice screen shows the active provider and model under AI settings.
+Copy `.env.example` to `.env` and set `AI_PROVIDER=codex` and, for a lighter model, `CODEX_MODEL=gpt-6-luna`. Set `COMPOSE_PROFILES=local-codex` if you want ordinary `docker compose up --build -d` to start the Codex sidecar automatically; otherwise use `docker compose --profile local-codex up --build -d`. If you prefer to reuse your existing CLI login, set `CODEX_AUTH_DIR` in `.env` to its directory (usually `$HOME/.codex`); this gives the Codex sidecar access to those login files. Select Codex and a model in Tao's header. The first problem can take a while because the sidecar starts a fresh Codex CLI process for each inference call.
 
-Uploaded text is stored with each resource. Topic suggestions are extracted from headings and the filename; no AI analyzes uploads yet. Topics store names and review state, not a separate summary. For a new problem, the AI receives the subject, topic, selected difficulty, and up to three resource excerpts of 3,500 characters each, taken near the topic name when found. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
+Uploaded text and a model-generated summary are stored with each resource. Topic suggestions are still extracted from headings and the filename; topics store names and review state, not a separate coverage summary yet. Resource summaries process extracted text in sections. For a new problem, the AI receives the subject, topic, selected difficulty, and up to three resource excerpts of 3,500 characters each, taken near the topic name when found. Hints use the problem, stored solution, earlier hints, and the student's message; answer checking uses the problem, stored solution, and submitted answer.
 
 ### Optional local AI
 
@@ -66,4 +66,4 @@ npm test
 ```
 
 See [AGENTS.md](AGENTS.md) for the product plan and development conventions. Production VPS deployment is planned but has not been configured yet.
-The proposed per-resource and per-topic summaries are described in [docs/content-model.md](docs/content-model.md); they are not implemented yet.
+The proposed topic coverage summaries and passage links are described in [docs/content-model.md](docs/content-model.md); they are not implemented yet.

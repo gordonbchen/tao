@@ -45,11 +45,17 @@ export function MathText({ text, className }: { text: string; className?: string
     const element = ref.current;
     if (!element) return;
     let active = true;
-    window.MathJax?.typesetClear?.([element]);
-    element.textContent = text;
-    void loadMathJax().then((mathjax) => {
-      if (active) return mathjax.typesetPromise([element]);
-    }).catch(() => {});
+    void loadMathJax().then(async (mathjax) => {
+      if (!active) return;
+      // MathJax replaces source text with rendered output. Clear that output
+      // before putting the latest response back so async updates can typeset.
+      mathjax.typesetClear([element]);
+      element.textContent = text;
+      await mathjax.typesetPromise([element]);
+    }).catch(() => {
+      // Keep the original text visible if MathJax cannot load or parse it.
+      if (active) element.textContent = text;
+    });
     return () => { active = false; window.MathJax?.typesetClear?.([element]); };
   }, [text]);
   return <div ref={ref} className={className}>{text}</div>;

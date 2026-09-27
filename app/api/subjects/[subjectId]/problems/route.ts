@@ -1,4 +1,4 @@
-import { generateProblem } from "@/lib/ai";
+import { aiOptionsFromRequest, generateProblem, hasAiProvider } from "@/lib/ai";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
 import { chooseProblemDifficulty } from "@/lib/scheduler";
@@ -20,6 +20,9 @@ export async function GET(request: Request, { params }: RouteContext) {
 export async function POST(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
+  const apiKey = request.headers.get("x-openai-api-key")?.trim() || undefined;
+  const aiOptions = aiOptionsFromRequest(request);
+  if (!hasAiProvider(apiKey, aiOptions)) return jsonError("Configure an AI provider in Settings before practicing", 409);
   let body: { topicId?: string };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   if (body.topicId !== undefined && (typeof body.topicId !== "string" || !isUuid(body.topicId))) return jsonError("Topic not found", 404);
@@ -43,13 +46,13 @@ export async function POST(request: Request, { params }: RouteContext) {
     ORDER BY CASE WHEN extracted_text ILIKE '%' || $3 || '%' THEN 0 ELSE 1 END, created_at DESC LIMIT 3`, [subjectId, LOCAL_OWNER_ID, topic.name]);
   const excerpts = resourceResult.rows.map((resource) => `${resource.filename}: ${resource.excerpt}`);
   try {
-    const generated = await generateProblem({ subject: subject.rows[0].name, topic: topic.name, difficulty, excerpts }, request.headers.get("x-openai-api-key")?.trim() || undefined);
+    const generated = await generateProblem({ subject: subject.rows[0].name, topic: topic.name, difficulty, excerpts }, apiKey, aiOptions);
     const allowedSources = new Set(resourceResult.rows.map((resource) => resource.filename));
     const sourceRefs = generated.sourceRefs.filter((source) => allowedSources.has(source));
     const result = await query(`INSERT INTO problems(subject_id, topic_id, prompt, solution, hints, difficulty, source_refs, generation_metadata)
       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb)
       RETURNING id, topic_id AS "topicId", prompt, difficulty, source_refs AS "sourceRefs", created_at AS "createdAt"`,
-    [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider })]);
+    [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider, model: generated.model })]);
     return Response.json({ problem: { ...result.rows[0], topicName: topic.name } }, { status: 201 });
   } catch {
     return jsonError("The tutor could not generate a problem. Check the configured AI provider or try again.", 502);

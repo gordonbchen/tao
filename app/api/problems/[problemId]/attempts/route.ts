@@ -1,4 +1,4 @@
-import { checkAnswer, type Correctness, type Rating } from "@/lib/ai";
+import { aiOptionsFromRequest, checkAnswer, hasAiProvider, type Correctness, type Rating } from "@/lib/ai";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query, transaction } from "@/lib/db";
 import { nextReview } from "@/lib/domain";
 type RouteContext = { params: Promise<{ problemId: string }> };
@@ -18,8 +18,11 @@ export async function POST(request: Request, { params }: RouteContext) {
     JOIN subjects s ON s.id = p.subject_id WHERE p.id = $1 AND s.owner_id = $2`, [problemId, LOCAL_OWNER_ID]);
   const problem = problemResult.rows[0];
   if (!problem) return jsonError("Problem not found", 404);
+  const apiKey = request.headers.get("x-openai-api-key")?.trim() || undefined;
+  const aiOptions = aiOptionsFromRequest(request);
+  if (!hasAiProvider(apiKey, aiOptions)) return jsonError("Configure an AI provider in Settings before checking answers", 409);
   let checked: { feedback: string; correctness: Correctness };
-  try { checked = await checkAnswer(problem, answer, request.headers.get("x-openai-api-key")?.trim() || undefined); }
+  try { checked = await checkAnswer(problem, answer, apiKey, aiOptions); }
   catch { return jsonError("The tutor could not check this answer. Check the configured AI provider or try again.", 502); }
   const saved = await transaction(async (client) => {
     const attempt = await client.query(`INSERT INTO attempts(problem_id, answer, rating, correctness, feedback)

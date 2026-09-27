@@ -46,7 +46,8 @@ export async function POST(request: Request, { params }: RouteContext) {
     await writeFile(storagePath, bytes, { flag: "wx" });
     const result = await query(`INSERT INTO resources(id, subject_id, owner_id, filename, content_type, storage_path, extracted_text, extraction_status)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, filename, content_type AS "contentType", extraction_status AS "extractionStatus", created_at AS "createdAt"`,
+      RETURNING id, filename, content_type AS "contentType", extraction_status AS "extractionStatus",
+        summary_status AS "summaryStatus", created_at AS "createdAt"`,
     [id, subjectId, LOCAL_OWNER_ID, path.basename(uploaded.name).slice(0, 255), pdf ? "application/pdf" : "text/plain", storagePath, extractedText, extractionStatus]);
     return Response.json({ ...result.rows[0], suggestedTopics: suggestTopics(extractedText, uploaded.name), scannedPdfNotice: pdf && !extractedText.trim() ? "No selectable text was found. This may be a scanned document; OCR is not available yet." : undefined }, { status: 201 });
   } catch (error) {

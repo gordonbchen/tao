@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query } from "@/lib/db";
 
 type RouteContext = { params: Promise<{ subjectId: string }> };
@@ -13,7 +14,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
         'lastRating', r.last_rating, 'lastCorrectness', r.last_correctness) AS review
       FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id
       WHERE t.subject_id = $1 ORDER BY t.created_at`, [subjectId]),
-    query(`SELECT id, filename, content_type AS "contentType", extraction_status AS "extractionStatus", created_at AS "createdAt"
+    query(`SELECT id, filename, content_type AS "contentType", extraction_status AS "extractionStatus",
+      summary_status AS "summaryStatus", created_at AS "createdAt"
       FROM resources WHERE subject_id = $1 AND owner_id = $2 ORDER BY created_at DESC`, [subjectId, LOCAL_OWNER_ID])
   ]);
   return Response.json({ subject: subjectResult.rows[0], topics: topicsResult.rows, resources: resourcesResult.rows });
@@ -35,6 +37,15 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 export async function DELETE(_request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId)) return jsonError("Subject not found", 404);
+  const resources = await query<{ storage_path: string }>(
+    "SELECT storage_path FROM resources WHERE subject_id = $1 AND owner_id = $2",
+    [subjectId, LOCAL_OWNER_ID],
+  );
   const result = await query("DELETE FROM subjects WHERE id = $1 AND owner_id = $2", [subjectId, LOCAL_OWNER_ID]);
-  return result.rowCount ? new Response(null, { status: 204 }) : jsonError("Subject not found", 404);
+  if (!result.rowCount) return jsonError("Subject not found", 404);
+  const cleanup = await Promise.allSettled(resources.rows.map(({ storage_path }) => rm(storage_path, { force: true })));
+  cleanup.forEach((result) => {
+    if (result.status === "rejected") console.error("Could not remove a deleted subject resource", result.reason);
+  });
+  return new Response(null, { status: 204 });
 }
