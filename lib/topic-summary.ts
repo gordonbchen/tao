@@ -42,7 +42,7 @@ function selectRelevantText(topicName: string, text: string, limit: number) {
   return [...keep].sort((a, b) => a - b).map((index) => blocks[index]).join("\n\n").slice(0, limit);
 }
 
-export async function summarizeTopic(topicName: string, sources: TopicSource[], options?: AiOptions) {
+export async function summarizeTopic(topicName: string, sources: TopicSource[], options?: AiOptions, previousSummary = "") {
   const perSourceLimit = Math.min(8_000, Math.max(1, Math.floor(40_000 / sources.length)));
   const context = sources.map((source) => {
     const text = source.summary.trim() || source.extractedText.trim();
@@ -52,8 +52,8 @@ export async function summarizeTopic(topicName: string, sources: TopicSource[], 
 
   const { value, provider, model } = await generateStructuredText(
     "topic_summary",
-    "Write an accurate, concise coverage summary for a student's course topic using only the linked source material. Include the definitions, results, assumptions, methods, notation, and representative examples that are relevant to this topic. Omit unrelated material. Do not add facts or claim the course covered anything absent from the sources. Preserve mathematical notation with \\( ... \\) inline and \\[ ... \\] for display. Return JSON with one string property named summary.",
-    JSON.stringify({ topic: topicName, linkedSources: context }),
+    "Update an accurate, concise coverage summary for a student's course topic using only the linked source material. Include the definitions, results, assumptions, methods, notation, and representative examples that are relevant to this topic. Preserve accurate student edits and useful organization from the previous summary where supported by the current sources. Omit unrelated material and remove claims no longer supported by linked sources. Do not add outside facts. Preserve mathematical notation with \\( ... \\) inline and \\[ ... \\] for display. Return JSON with one string property named summary.",
+    JSON.stringify({ topic: topicName, previousSummary: previousSummary.slice(0, 16_000), linkedSources: context }),
     options,
   );
   if (!value || typeof value !== "object" || typeof (value as { summary?: unknown }).summary !== "string") {

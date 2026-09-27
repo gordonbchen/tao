@@ -9,7 +9,8 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
     WHERE tr.topic_id = t.id AND tr.resource_id = r.id AND t.subject_id = s.id
       AND s.owner_id = $3 AND r.owner_id = $3 AND t.id = $1 AND r.id = $2`, [topicId, resourceId, LOCAL_OWNER_ID]);
   if (!result.rowCount) return jsonError("Topic-resource link not found", 404);
-  await query(`UPDATE topics SET summary_status = CASE WHEN summary_status = 'pending' THEN summary_status ELSE 'not_generated' END,
+  await query(`UPDATE topics SET coverage_summary = CASE WHEN EXISTS (SELECT 1 FROM topic_resources WHERE topic_id = $1)
+      THEN coverage_summary ELSE '' END, summary_status = 'not_generated',
     summary_provider = NULL, summary_model = NULL WHERE id = $1`, [topicId]);
   return new Response(null, { status: 204 });
 }

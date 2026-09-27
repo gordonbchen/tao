@@ -51,7 +51,8 @@ function SubjectContent() {
   const [topicSummaryLoading, setTopicSummaryLoading] = useState(false);
   const [topicSummaryError, setTopicSummaryError] = useState("");
   const [topicEditingSummary, setTopicEditingSummary] = useState(false);
-  const [topicResourceChoice, setTopicResourceChoice] = useState("");
+  const [selectedTopicResources, setSelectedTopicResources] = useState<string[]>([]);
+  const [savingTopicResources, setSavingTopicResources] = useState(false);
   const [resourceTopicChoice, setResourceTopicChoice] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState("");
@@ -193,18 +194,44 @@ function SubjectContent() {
   async function showTopic(topic: Topic) {
     setResourceText(null);
     setTopicSummaryError("");
-    setTopicResourceChoice("");
+    setSelectedTopicResources([]);
     setTopicEditingSummary(false);
     try {
       const detail = await api<TopicDetail>(`/api/topics/${topic.id}`);
       setTopicDetail(detail);
+      setSelectedTopicResources(detail.resources.map((resource) => resource.id));
       setTopicTab("summary");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load topic"); }
   }
 
   async function refreshTopic(topicId: string) {
     const detail = await api<TopicDetail>(`/api/topics/${topicId}`);
-    setTopicDetail(detail);
+    if (topicDetail?.id === topicId) {
+      setTopicDetail(detail);
+      setSelectedTopicResources(detail.resources.map((resource) => resource.id));
+    }
+    return detail;
+  }
+
+  async function saveTopicResources() {
+    if (!topicDetail || savingTopicResources) return;
+    const topicId = topicDetail.id;
+    setSavingTopicResources(true);
+    setTopicSummaryError("");
+    try {
+      const result = await api<{ changed: boolean }>(`/api/topics/${topicId}/resources`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceIds: selectedTopicResources }),
+      });
+      await refreshTopic(topicId);
+      setResources((current) => current.map((resource) => ({ ...resource,
+        topicIds: selectedTopicResources.includes(resource.id)
+          ? [...new Set([...(resource.topicIds ?? []), topicId])]
+          : (resource.topicIds ?? []).filter((linkedId) => linkedId !== topicId),
+      })));
+      setTopicTab("summary");
+      if (result.changed && selectedTopicResources.length) await generateTopicSummary(topicId);
+    } catch (e) { setTopicSummaryError(e instanceof Error ? e.message : "Could not save linked resources"); }
+    finally { setSavingTopicResources(false); }
   }
 
   async function generateTopicSummary(topicId: string) {
@@ -241,17 +268,19 @@ function SubjectContent() {
       await refreshTopic(topicId);
       setResources((current) => current.map((resource) => resource.id === resourceId ? { ...resource, topicIds: [...new Set([...(resource.topicIds ?? []), topicId])] } : resource));
       setResourceText((current) => current ? { ...current, topics: current.topics.some((topic) => topic.id === topicId) ? current.topics : [...current.topics, { id: topicId, name: topics.find((topic) => topic.id === topicId)?.name ?? "Topic" }] } : current);
-      setTopicResourceChoice("");
       setResourceTopicChoice("");
+      void generateTopicSummary(topicId);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not link resource"); }
   }
 
   async function unlinkResource(topicId: string, resourceId: string) {
     try {
       await api(`/api/topics/${topicId}/resources/${resourceId}`, { method: "DELETE" });
-      if (topicDetail?.id === topicId) await refreshTopic(topicId);
+      const detail = await api<TopicDetail>(`/api/topics/${topicId}`);
+      if (topicDetail?.id === topicId) { setTopicDetail(detail); setSelectedTopicResources(detail.resources.map((resource) => resource.id)); }
       setResources((current) => current.map((resource) => resource.id === resourceId ? { ...resource, topicIds: (resource.topicIds ?? []).filter((id) => id !== topicId) } : resource));
       setResourceText((current) => current ? { ...current, topics: current.topics.filter((topic) => topic.id !== topicId) } : current);
+      if (detail.resources.length) void generateTopicSummary(topicId);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not unlink resource"); }
   }
 
@@ -296,6 +325,7 @@ function SubjectContent() {
         return remaining.length ? [{ ...current[0], topics: remaining }, ...current.slice(1)] : current.slice(1);
       });
       await refresh();
+      void generateTopicSummary(topic.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add topic");
     }
@@ -363,8 +393,8 @@ function SubjectContent() {
           {topicDetail.coverageSummary ? <><p className="resource-caption">Coverage summary{topicDetail.summaryProvider ? ` · ${topicDetail.summaryProvider}${topicDetail.summaryModel ? ` · ${topicDetail.summaryModel}` : ""}` : ""}</p>{topicDetail.summaryStatus !== "complete" && <p className="topic-stale-note">Linked resources changed. Refresh this summary to reflect them.</p>}{topicEditingSummary ? <textarea className="topic-summary-editor" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="topic-summary-text" text={topicDetail.coverageSummary} />}<div className="topic-summary-actions">{topicEditingSummary ? <button type="button" className="button" onClick={() => void saveTopicSummary()}>Save edits</button> : <button type="button" className="button" onClick={() => setTopicEditingSummary(true)}>Edit</button>}<button type="button" className="button button-primary" disabled={!topicDetail.resources.length || topicSummaryLoading} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</button></div></> : <div className="resource-summary-empty"><p>{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><button type="button" className="button button-primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</button></div>}
         </>}
       </section> : <section className="topic-resources-panel" role="tabpanel" aria-label="Resources linked to topic">
-        <div className="link-picker"><select aria-label="Resource to link" value={topicResourceChoice} onChange={(event) => setTopicResourceChoice(event.target.value)}><option value="">Add a resource…</option>{resources.filter((resource) => !topicDetail.resources.some((linked) => linked.id === resource.id)).map((resource) => <option key={resource.id} value={resource.id}>{resource.filename}</option>)}</select><button type="button" className="button" disabled={!topicResourceChoice} onClick={() => void attachResource(topicDetail.id, topicResourceChoice)}><Plus size={16} />Link</button></div>
-        {topicDetail.resources.length ? <ul className="simple-list topic-resource-list">{topicDetail.resources.map((resource) => <li key={resource.id}><FileText size={18} /><button type="button" className="resource-open" onClick={() => void showResourceText({ id: resource.id, filename: resource.filename })}>{resource.filename}</button><button type="button" className="icon-action" title="Unlink resource" aria-label={`Unlink ${resource.filename}`} onClick={() => void unlinkResource(topicDetail.id, resource.id)}><Unlink size={17} /></button></li>)}</ul> : <p className="quiet-empty">No linked resources yet.</p>}
+        <div className="topic-resource-controls"><details className="multi-resource-picker"><summary>{selectedTopicResources.length ? `${selectedTopicResources.length} selected` : "Select resources…"}</summary><div className="multi-resource-options">{resources.length ? resources.map((resource) => <label key={resource.id}><input type="checkbox" checked={selectedTopicResources.includes(resource.id)} onChange={(event) => setSelectedTopicResources((current) => event.target.checked ? [...current, resource.id] : current.filter((id) => id !== resource.id))} /><span>{resource.filename}</span><Check size={17} aria-hidden="true" className={selectedTopicResources.includes(resource.id) ? "selected" : ""} /></label>) : <p>No resources uploaded yet.</p>}</div></details><button type="button" className="button button-primary" disabled={savingTopicResources || topicSummaryLoading || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicResources || topicSummaryLoading ? "Saving…" : "Save"}</button></div>
+        {topicDetail.resources.length ? <ul className="simple-list topic-resource-list">{topicDetail.resources.map((resource) => <li key={resource.id}><FileText size={18} /><button type="button" className="resource-open" onClick={() => void showResourceText({ id: resource.id, filename: resource.filename })}>{resource.filename}</button></li>)}</ul> : <p className="quiet-empty">No linked resources yet.</p>}
       </section>}
     </div></div>}
   </main>;

@@ -103,6 +103,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .link-picker { display: flex; align-items: center; gap: 8px; }
 .link-picker select { max-width: min(54vw, 390px); min-width: 160px; border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; background: var(--paper); color: var(--ink); }
 .link-picker .button { padding: 5px 10px; font-size: 16px; }
+.topic-resource-controls { display: flex; align-items: start; gap: 9px; }
+.multi-resource-picker { position: relative; width: min(100%, 390px); }
+.multi-resource-picker summary { display: flex; align-items: center; justify-content: space-between; min-height: 43px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); cursor: pointer; list-style: none; }
+.multi-resource-picker summary::-webkit-details-marker { display: none; }
+.multi-resource-picker summary::after { content: "⌄"; margin-left: 12px; color: var(--muted); }
+.multi-resource-picker[open] summary { border-color: var(--accent); }
+.multi-resource-options { position: absolute; z-index: 5; top: calc(100% + 4px); width: 100%; max-height: 270px; overflow: auto; padding: 5px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: 0 8px 22px #0002; }
+.multi-resource-options label { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 4px; cursor: pointer; }
+.multi-resource-options label:hover, .multi-resource-options label:focus-within { background: var(--accent-soft); }
+.multi-resource-options input { position: absolute; opacity: 0; }
+.multi-resource-options span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.multi-resource-options svg { flex: none; visibility: hidden; color: var(--accent); }
+.multi-resource-options svg.selected { visibility: visible; }
+.multi-resource-options p { margin: 8px; color: var(--muted); }
 .topic-summary-panel, .topic-resources-panel { min-height: min(64vh, 680px); padding: 18px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .topic-summary-text { overflow-wrap: anywhere; font-size: 20px; line-height: 1.65; }
 .suggestion-source { margin: 3px 0 0; color: var(--muted); font-size: 15px; }

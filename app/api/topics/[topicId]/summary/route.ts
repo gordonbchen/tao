@@ -7,7 +7,7 @@ type RouteContext = { params: Promise<{ topicId: string }> };
 export async function POST(request: Request, { params }: RouteContext) {
   const { topicId } = await params;
   if (!isUuid(topicId)) return jsonError("Topic not found", 404);
-  const topicResult = await query<{ id: string; name: string }>(`SELECT t.id, t.name FROM topics t JOIN subjects s ON s.id = t.subject_id
+  const topicResult = await query<{ id: string; name: string; coverageSummary: string }>(`SELECT t.id, t.name, t.coverage_summary AS "coverageSummary" FROM topics t JOIN subjects s ON s.id = t.subject_id
     WHERE t.id = $1 AND s.owner_id = $2`, [topicId, LOCAL_OWNER_ID]);
   const topic = topicResult.rows[0];
   if (!topic) return jsonError("Topic not found", 404);
@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   try {
     await query("UPDATE topics SET summary_status = 'pending' WHERE id = $1", [topicId]);
-    const generated = await summarizeTopic(topic.name, sources.rows.map((source) => ({ filename: source.filename, summary: source.modelSummary, extractedText: source.extractedText })), aiOptionsFromRequest(request));
+    const generated = await summarizeTopic(topic.name, sources.rows.map((source) => ({ filename: source.filename, summary: source.modelSummary, extractedText: source.extractedText })), aiOptionsFromRequest(request), topic.coverageSummary);
     const saved = await query(`UPDATE topics SET coverage_summary = $2, summary_status = 'complete', summary_provider = $3,
       summary_model = $4 WHERE id = $1 RETURNING id, name, coverage_summary AS "coverageSummary", summary_status AS "summaryStatus",
       summary_provider AS "summaryProvider", summary_model AS "summaryModel"`, [topicId, generated.summary, generated.provider, generated.model]);
