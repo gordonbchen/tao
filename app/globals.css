@@ -121,6 +121,8 @@
   :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
   ::placeholder { color: var(--muted); opacity: 1; }
   mjx-container[display] { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+  /* Preflight makes every svg a block; MathJax splits inline math into several svgs that must stay inline. */
+  mjx-container svg { display: inline; max-width: none; }
 }
 
 /* Generated Markdown cannot carry utility classes, so style its elements here. */
