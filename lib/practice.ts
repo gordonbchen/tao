@@ -90,6 +90,22 @@ export async function takeReadyProblem(subjectId: string, { topicId, groupId }: 
   return result.rows[0] ?? null;
 }
 
+// The most recently served problem in the selection that the student left without answering or skipping,
+// with its tutor chat, so Practice returns to it instead of generating another.
+export async function findUnfinishedProblem(subjectId: string, { topicId, groupId }: PracticeSelection = {}) {
+  const result = await query<ServedProblem>(`${subtreeCte} SELECT ${problemColumns} FROM problems p
+    JOIN topics t ON t.id = p.topic_id AND t.coverage_confirmed
+    WHERE p.subject_id = $2 AND p.served_at IS NOT NULL AND ${inSelection}
+      AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.problem_id = p.id)
+      AND NOT EXISTS (SELECT 1 FROM problem_feedback f WHERE f.problem_id = p.id AND f.skipped)
+    ORDER BY p.served_at DESC LIMIT 1`, [groupId ?? null, subjectId, topicId ?? null]);
+  const problem = result.rows[0];
+  if (!problem) return null;
+  const messages = await query<{ role: "user" | "assistant"; text: string }>(`SELECT CASE WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role,
+    content AS text FROM tutor_messages WHERE problem_id = $1 AND kind IN ('question', 'hint') ORDER BY created_at`, [problem.id]);
+  return { ...problem, messages: messages.rows };
+}
+
 // Keeps one generated problem waiting for each practice selection (any topic, a folder, or one topic) so
 // Practice opens immediately. It is stored, so it carries over between visits instead of being regenerated.
 const preparing: Map<string, Promise<void>> = ((globalThis as { taoReadyProblemPreparations?: Map<string, Promise<void>> }).taoReadyProblemPreparations ??= new Map());

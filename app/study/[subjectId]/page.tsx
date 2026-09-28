@@ -9,7 +9,7 @@ import { MathText } from "../../math-text";
 import { Badge, Button, Card, cn, ErrorMessage, IconButton, Page, Spinner, Textarea, ToggleButton } from "../../ui";
 
 type Topic = { id: string; name: string };
-type Problem = { id: string; topicId: string; prompt: string; difficulty: string; isReview?: boolean };
+type Problem = { id: string; topicId: string; prompt: string; difficulty: string; isReview?: boolean; messages?: Message[] };
 type Message = { role: "assistant" | "user"; text: string };
 type Feedback = { feedback: string; correctness: "correct" | "partial" | "incorrect" | "uncertain"; solution?: string };
 const ratings = [{ value: "easy", label: "Easy" }, { value: "okay", label: "Okay" }, { value: "hard", label: "Hard" }, { value: "could_not_solve", label: "Couldn’t solve" }];
@@ -79,7 +79,7 @@ function StudyContent() {
     setWorking(true); setGenerating(true); setError("");
     try {
       const result = await api<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ ...requested, ...(skipReuse ? { skipReuse: true } : {}) }) });
-      setProblem(result.problem); setFeedback(null); setShowSolution(false); setAnswer(""); setRating("okay"); setChatText(""); setMessages([]);
+      setProblem(result.problem); setFeedback(null); setShowSolution(false); setAnswer(""); setRating("okay"); setChatText(""); setMessages(result.problem.messages ?? []);
       setShowProblemFeedback(false); setProblemFeedbackTags([]); setProblemFeedbackNote(""); setProblemFeedbackSaved(false);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create a problem"); }
     finally { setWorking(false); setGenerating(false); }

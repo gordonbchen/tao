@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { aiOptionsFromRequest, hasAiProvider } from "@/lib/ai";
 import { isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
-import { createProblem, pickTopic, prepareReadyProblem, takeOrAwaitReadyProblem, topicReview } from "@/lib/practice";
+import { createProblem, findUnfinishedProblem, pickTopic, prepareReadyProblem, takeOrAwaitReadyProblem, topicReview } from "@/lib/practice";
 import { shouldReuseDueProblem } from "@/lib/scheduler";
 type RouteContext = { params: Promise<{ subjectId: string }> };
 
@@ -30,6 +30,9 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (body.groupId !== undefined && (typeof body.groupId !== "string" || !isUuid(body.groupId))) return jsonError("Folder not found", 404);
   if (body.skipReuse !== undefined && typeof body.skipReuse !== "boolean") return jsonError("skipReuse must be a boolean");
   const selection = body.topicId ? { topicId: body.topicId } : body.groupId ? { groupId: body.groupId } : {};
+  // Return to a problem the student opened but neither answered nor skipped. skipReuse asks for a new one.
+  const unfinished = body.skipReuse ? null : await findUnfinishedProblem(subjectId, selection);
+  if (unfinished) return Response.json({ problem: unfinished });
   const topic = await pickTopic(subjectId, selection);
   if (!topic) return jsonError("Add and confirm at least one covered topic before generating practice", 409);
   const lastAttemptResult = await query<{ id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; createdAt: Date; lastAttemptAt: Date; rating: string; correctness: string }>(
