@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, FileText, Pencil, Plus, Trash2, X, Check, Unlink } from "lucide-react";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
+import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Select, Spinner, Tabs, Textarea } from "../../ui";
 
 type Topic = { id: string; name: string; summaryStatus?: string };
 type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: string[] };
@@ -93,13 +94,6 @@ function SubjectContent() {
       window.removeEventListener("tao:error", onError);
     };
   }, [refresh]);
-
-  useEffect(() => {
-    if (!resourceText && !topicDetail) return;
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { setResourceText(null); setTopicDetail(null); } };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [resourceText, topicDetail]);
 
   async function addTopic(event: React.FormEvent) {
     event.preventDefault();
@@ -358,74 +352,80 @@ function SubjectContent() {
   const availableResources = resources.filter((resource) => !selectedTopicResources.includes(resource.id)
     && resource.filename.toLocaleLowerCase().includes(resourceSearch.trim().toLocaleLowerCase()));
 
-  return <main className="content subject-content">
-    <Link href="/" className="back-link"><ArrowLeft size={18} />Subjects</Link>
+  const caption = (label: string, provider?: string | null, model?: string | null) => <p className="mb-3 text-xs text-muted">{label}{provider ? ` · ${provider}${model ? ` · ${model}` : ""}` : ""}</p>;
+  const pending = (text: string, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-3 py-6 text-muted"><Spinner />{text}{action}</div>;
+  const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
+  const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";
+  const rowTitle = "flex min-w-0 flex-1 items-center gap-3 self-stretch text-left hover:text-accent disabled:cursor-wait";
+  const choiceRow = "flex h-full min-h-12 w-full items-center gap-3 text-left text-sm hover:text-accent";
+  const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
+
+  return <Page>
+    <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
-      <div className="subject-heading"><h1>{subject.name}</h1>
-        <div className="practice-actions">
-          <label className="visually-hidden" htmlFor="practice-topic">Topic to practice</label>
-          <select id="practice-topic" value={selectedTopic} onChange={(event) => setSelectedTopic(event.target.value)} disabled={!topics.length}>
+      <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
+        <div className="flex items-center gap-2 max-sm:w-full">
+          <Select className="max-w-56 max-sm:max-w-none max-sm:flex-1" aria-label="Topic to practice" value={selectedTopic} onChange={(event) => setSelectedTopic(event.target.value)} disabled={!topics.length}>
             <option value="">Any topic</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
-          </select>
-          <button className="button button-primary" disabled={!topics.length || !aiSettings.ready} onClick={() => { if (!aiSettings.configured) { notifyAiSetupRequired(); return; } router.push(`/study/${id}${selectedTopic ? `?topic=${encodeURIComponent(selectedTopic)}` : ""}`); }}>Practice</button>
+          </Select>
+          <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => { if (!aiSettings.configured) { notifyAiSetupRequired(); return; } router.push(`/study/${id}${selectedTopic ? `?topic=${encodeURIComponent(selectedTopic)}` : ""}`); }}>Practice</Button>
         </div>
       </div>
-      {error && <div className="error-message">{error}</div>}
+      {error && <ErrorMessage>{error}</ErrorMessage>}
 
-      <section className="simple-section">
-        <div className="section-title-row"><h2>Topics</h2><form className="simple-add topic-add" onSubmit={addTopic}><input aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><button className="button" disabled={!topicName.trim() || busy} aria-label="Add topic"><Plus size={18} /></button></form></div>
-        {topics.length > 0 && <ul className="simple-list">{topics.map((topic) => <li key={topic.id}>
-          {editingTopic === topic.id ? <form className="topic-edit" onSubmit={(event) => { event.preventDefault(); void saveTopic(topic); }}><input aria-label="Topic name" autoFocus maxLength={160} value={editedName} onChange={(event) => setEditedName(event.target.value)} /><button type="submit" className="icon-action" aria-label="Save topic name"><Check size={18} /></button><button type="button" className="icon-action" aria-label="Cancel editing" onClick={() => setEditingTopic(null)}><X size={18} /></button></form> : <><button type="button" className="topic-open" onClick={() => void showTopic(topic)} title="View topic summary and linked resources"><BookOpen size={17} /><span>{topic.name}</span></button><button className="icon-action" aria-label={`Edit ${topic.name}`} title="Edit topic" onClick={() => { setEditingTopic(topic.id); setEditedName(topic.name); }}><Pencil size={16} /></button><button className="icon-action" aria-label={`Remove ${topic.name}`} title="Remove topic" onClick={() => removeTopic(topic)}><Trash2 size={18} /></button></>}
-        </li>)}</ul>}
-        {topics.length === 0 && <p className="quiet-empty">Add a topic to start practicing.</p>}
+      <section className="mb-12">
+        <div className={sectionHead}><h2 className="text-xl font-semibold">Topics</h2><form className="flex items-center gap-2" onSubmit={addTopic}><Input className="w-56 max-sm:w-40" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form></div>
+        {topics.length > 0 && <List>{topics.map((topic) => <ListItem key={topic.id}>
+          {editingTopic === topic.id ? <form className="flex flex-1 items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveTopic(topic); }}><Input className="flex-1" aria-label="Topic name" autoFocus maxLength={160} value={editedName} onChange={(event) => setEditedName(event.target.value)} /><IconButton type="submit" label="Save topic name"><Check size={18} /></IconButton><IconButton label="Cancel editing" onClick={() => setEditingTopic(null)}><X size={18} /></IconButton></form> : <><button type="button" className={rowTitle} onClick={() => void showTopic(topic)} title="View topic summary and linked resources"><BookOpen size={18} className="flex-none text-muted" /><span className="truncate">{topic.name}</span></button><IconButton label={`Edit ${topic.name}`} onClick={() => { setEditingTopic(topic.id); setEditedName(topic.name); }}><Pencil size={18} /></IconButton><IconButton label={`Remove ${topic.name}`} tone="danger" onClick={() => removeTopic(topic)}><Trash2 size={18} /></IconButton></>}
+        </ListItem>)}</List>}
+        {topics.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
       </section>
 
-      <section className="simple-section">
-        <div className="section-title-row"><h2>Resources</h2><button className="button" type="button" onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</button></div>
+      <section>
+        <div className={sectionHead}><h2 className="text-xl font-semibold">Resources</h2><Button onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</Button></div>
         <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple hidden onChange={e => void uploadFiles(e.currentTarget.files)} />
-        {resources.length > 0 && <ul className="simple-list resource-list">{resources.map((resource) => <li key={resource.id}><FileText size={18} /><button className="resource-open" type="button" onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text">{resource.filename}</button><button className="icon-action" aria-label={`Remove ${resource.filename}`} title="Remove resource" onClick={() => removeResource(resource)}><Trash2 size={18} /></button></li>)}</ul>}
+        {resources.length > 0 && <List>{resources.map((resource) => <ListItem key={resource.id}><button type="button" className={rowTitle} onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text"><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button><IconButton label={`Remove ${resource.filename}`} tone="danger" onClick={() => removeResource(resource)}><Trash2 size={18} /></IconButton></ListItem>)}</List>}
       </section>
     </>}
 
-    {suggestions && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSuggestionQueue((current) => current.slice(1)); }}><div className="modal"><div className="modal-head"><div><h2>Suggested topics</h2><p className="suggestion-source">{suggestions.resource.filename}</p></div><button className="modal-close" aria-label="Close" onClick={() => setSuggestionQueue((current) => current.slice(1))}>×</button></div><ul className="simple-list">{suggestions.topics.map((topic) => <li key={topic}><span>{topic}</span><button className="button" onClick={() => addSuggestedTopic(topic)}><Plus size={18} />Add</button></li>)}</ul><div className="modal-actions"><button className="button" onClick={() => setSuggestionQueue((current) => current.slice(1))}>{suggestionQueue.length > 1 ? "Next resource" : "Done"}</button></div></div></div>}
-    {resourceText && <div className="modal-backdrop resource-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setResourceText(null); }}><div className="modal resource-modal" role="dialog" aria-modal="true" aria-label={`Summary and extracted text from ${resourceText.filename}`}>
-      <div className="modal-head"><h2>{resourceText.filename}</h2><button className="modal-close" aria-label="Close" onClick={() => setResourceText(null)}><X size={19} /></button></div>
-      <div className="content-links"><span>Topics</span>{resourceText.topics.map((topic) => <span className="content-link-chip" key={topic.id}>{topic.name}<button type="button" className="icon-action" title={`Unlink ${topic.name}`} aria-label={`Unlink ${topic.name}`} onClick={() => void unlinkResource(topic.id, resourceText.id)}><Unlink size={14} /></button></span>)}
-        {topics.some((topic) => !resourceText.topics.some((linked) => linked.id === topic.id)) && <div className="link-picker"><select aria-label="Topic to link" value={resourceTopicChoice} onChange={(event) => setResourceTopicChoice(event.target.value)}><option value="">Link to topic…</option>{topics.filter((topic) => !resourceText.topics.some((linked) => linked.id === topic.id)).map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}</select><button type="button" className="button" disabled={!resourceTopicChoice} onClick={() => void attachResource(resourceTopicChoice, resourceText.id)}><Plus size={16} />Link</button></div>}
+    {suggestions && <Modal title="Suggested topics" subtitle={suggestions.resource.filename} onClose={closeSuggestions}>
+      <List>{suggestions.topics.map((topic) => <ListItem key={topic}><span className="min-w-0 flex-1">{topic}</span><Button size="sm" onClick={() => addSuggestedTopic(topic)}><Plus size={16} />Add</Button></ListItem>)}</List>
+      <div className="mt-6 flex justify-end"><Button onClick={closeSuggestions}>{suggestionQueue.length > 1 ? "Next resource" : "Done"}</Button></div>
+    </Modal>}
+
+    {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
+      <div className="mb-6 flex flex-wrap items-center gap-2"><span className="mr-1 text-sm text-muted">Topics</span>{resourceText.topics.map((topic) => <Badge className="h-control-sm py-0 pr-1" key={topic.id}>{topic.name}<IconButton size="xs" label={`Unlink ${topic.name}`} className="text-accent" onClick={() => void unlinkResource(topic.id, resourceText.id)}><Unlink size={14} /></IconButton></Badge>)}
+        {topics.some((topic) => !resourceText.topics.some((linked) => linked.id === topic.id)) && <div className="flex items-center gap-2"><Select className="h-control-sm" aria-label="Topic to link" value={resourceTopicChoice} onChange={(event) => setResourceTopicChoice(event.target.value)}><option value="">Link to topic…</option>{topics.filter((topic) => !resourceText.topics.some((linked) => linked.id === topic.id)).map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}</Select><Button size="sm" disabled={!resourceTopicChoice} onClick={() => void attachResource(resourceTopicChoice, resourceText.id)}><Plus size={16} />Link</Button></div>}
       </div>
-      <div className="resource-tabs" role="tablist" aria-label="Resource content">
-        <button type="button" role="tab" aria-selected={resourceTab === "summary"} className={resourceTab === "summary" ? "active" : ""} onFocus={() => setResourceTab("summary")} onKeyDown={(event) => { if (event.key === "ArrowRight") { event.preventDefault(); setResourceTab("extracted"); (event.currentTarget.nextElementSibling as HTMLButtonElement | null)?.focus(); } }} onClick={() => setResourceTab("summary")}>Summary</button>
-        <button type="button" role="tab" aria-selected={resourceTab === "extracted"} className={resourceTab === "extracted" ? "active" : ""} onFocus={() => setResourceTab("extracted")} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); setResourceTab("summary"); (event.currentTarget.previousElementSibling as HTMLButtonElement | null)?.focus(); } }} onClick={() => setResourceTab("extracted")}>Extracted text <span>{resourceText.extractedText.length.toLocaleString()}</span></button>
-      </div>
-      {resourceTab === "summary" ? <section className="resource-summary" role="tabpanel" aria-label="Model summary">
-        {summaryError && <p className="error-message" role="alert">{summaryError}</p>}
-        {summaryLoading || resourceText.summaryStatus === "pending" ? <div className="resource-summary-state"><span className="spinner" /> Summarizing this resource…{!summaryLoading && <button type="button" className="button" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</button>}</div> : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
-          <p className="resource-caption">Model summary{resourceText.summaryProvider ? ` · ${resourceText.summaryProvider}${resourceText.summaryModel ? ` · ${resourceText.summaryModel}` : ""}` : ""}</p>
-          <MarkdownMathText className="resource-summary-text" text={resourceText.modelSummary} />
-        </> : <div className="resource-summary-empty">
-          <p>{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
-          {resourceText.extractedText ? <button type="button" className="button" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</button> : <p>No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>}
+      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
+      {resourceTab === "summary" ? <section role="tabpanel" aria-label="Model summary">
+        {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
+        {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
+          {caption("Model summary", resourceText.summaryProvider, resourceText.summaryModel)}
+          <MarkdownMathText className="max-w-3xl" text={resourceText.modelSummary} />
+        </> : <div className="flex flex-col items-start gap-4 py-4">
+          <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
+          {resourceText.extractedText ? <Button variant="primary" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</Button> : noText}
         </div>}
-      </section> : <section role="tabpanel" aria-label="Extracted text"><p className="resource-caption">Text extracted from this file</p>{resourceText.extractedText ? <pre className="resource-extracted">{resourceText.extractedText}</pre> : <p>No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>}</section>}
-    </div></div>}
-    {topicDetail && <div className="modal-backdrop resource-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setTopicDetail(null); }}><div className="modal resource-modal topic-modal" role="dialog" aria-modal="true" aria-label={`Topic summary for ${topicDetail.name}`}>
-      <div className="modal-head"><h2>{topicDetail.name}</h2><button className="modal-close" aria-label="Close" onClick={() => setTopicDetail(null)}><X size={19} /></button></div>
-      <div className="resource-tabs" role="tablist" aria-label="Topic content">
-        <button type="button" role="tab" aria-selected={topicTab === "summary"} className={topicTab === "summary" ? "active" : ""} onClick={() => setTopicTab("summary")}>Summary</button>
-        <button type="button" role="tab" aria-selected={topicTab === "resources"} className={topicTab === "resources" ? "active" : ""} onClick={() => setTopicTab("resources")}>Resources <span>{topicDetail.resources.length}</span></button>
-      </div>
-      {topicTab === "summary" ? <section className="topic-summary-panel" role="tabpanel" aria-label="Topic coverage summary">
-        {topicSummaryErrors[topicDetail.id] && <p className="error-message" role="alert">{topicSummaryErrors[topicDetail.id]}</p>}
-        {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? <div className="resource-summary-state"><span className="spinner" /> Summarizing linked material…</div> : <>
-          {topicDetail.coverageSummary ? <><p className="resource-caption">Coverage summary{topicDetail.summaryProvider ? ` · ${topicDetail.summaryProvider}${topicDetail.summaryModel ? ` · ${topicDetail.summaryModel}` : ""}` : ""}</p>{topicDetail.summaryStatus !== "complete" && <p className="topic-stale-note">Linked resources changed. Refresh this summary to reflect them.</p>}{topicEditingSummary ? <textarea className="topic-summary-editor" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="topic-summary-text" text={topicDetail.coverageSummary} />}<div className="topic-summary-actions">{topicEditingSummary ? <button type="button" className="button" onClick={() => void saveTopicSummary()}>Save edits</button> : <button type="button" className="button" onClick={() => setTopicEditingSummary(true)}>Edit</button>}<button type="button" className="button button-primary" disabled={!topicDetail.resources.length || summarizingTopicIds.includes(topicDetail.id)} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</button></div></> : <div className="resource-summary-empty"><p>{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><button type="button" className="button button-primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</button></div>}
-        </>}
-      </section> : <section className="topic-resources-panel" role="tabpanel" aria-label="Resources linked to topic">
-        {topicSummaryErrors[topicDetail.id] && <p className="error-message" role="alert">{topicSummaryErrors[topicDetail.id]}</p>}
-        <div className="topic-resource-toolbar"><h3>Selected resources</h3><button type="button" className="button button-primary" disabled={savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id) || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicIds.includes(topicDetail.id) ? "Saving…" : summarizingTopicIds.includes(topicDetail.id) ? "Summarizing…" : "Save"}</button></div>
-        {selectedResources.length ? <ul className="simple-list topic-resource-list">{selectedResources.map((resource) => <li key={resource.id}><button type="button" className="topic-resource-choice" aria-label={`Remove ${resource.filename} from this topic`} onClick={() => setSelectedTopicResources((current) => current.filter((resourceId) => resourceId !== resource.id))}><FileText size={18} /><span>{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) ? <span className="resource-change-badge">Saved</span> : <span className="resource-change-badge pending">To add</span>}<Check size={18} className="choice-icon" /></button></li>)}</ul> : <p className="topic-resource-empty">No resources selected.</p>}
-        <div className="topic-resource-available"><h3>Add resources</h3><input type="search" aria-label="Search available resources" placeholder="Search resources" value={resourceSearch} onChange={(event) => setResourceSearch(event.target.value)} /></div>
-        {availableResources.length ? <ul className="simple-list topic-resource-list">{availableResources.map((resource) => <li key={resource.id}><button type="button" className="topic-resource-choice" aria-label={`Add ${resource.filename} to this topic`} onClick={() => setSelectedTopicResources((current) => [...current, resource.id])}><FileText size={18} /><span>{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) && <span className="resource-change-badge pending-remove">To remove</span>}<Plus size={18} className="choice-icon" /></button></li>)}</ul> : <p className="topic-resource-empty">{resources.length === 0 ? "No resources uploaded yet." : resourceSearch ? "No matching resources." : "All resources selected."}</p>}
+      </section> : <section role="tabpanel" aria-label="Extracted text">{caption("Text extracted from this file")}{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
+    </Modal>}
+
+    {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)}>
+      <Tabs label="Topic content" value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }]} />
+      {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
+      {topicTab === "summary" ? <section role="tabpanel" aria-label="Topic coverage summary">
+        {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
+          {caption("Coverage summary", topicDetail.summaryProvider, topicDetail.summaryModel)}
+          {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
+          {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="max-w-3xl" text={topicDetail.coverageSummary} />}
+          <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
+        </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
+      </section> : <section role="tabpanel" aria-label="Resources linked to topic">
+        <div className={sectionHead}><h3 className="text-lg font-semibold">Selected resources</h3><Button variant="primary" disabled={savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id) || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicIds.includes(topicDetail.id) ? "Saving…" : summarizingTopicIds.includes(topicDetail.id) ? "Summarizing…" : "Save"}</Button></div>
+        {selectedResources.length ? <List className="mb-8">{selectedResources.map((resource) => <ListItem key={resource.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Remove ${resource.filename} from this topic`} onClick={() => setSelectedTopicResources((current) => current.filter((resourceId) => resourceId !== resource.id))}><FileText size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) ? <Badge tone="neutral">Saved</Badge> : <Badge>To add</Badge>}<Check size={18} className="flex-none text-accent" /></button></ListItem>)}</List> : <p className="mb-8 text-sm text-muted">No resources selected.</p>}
+        <div className={sectionHead}><h3 className="text-lg font-semibold">Add resources</h3><Input className="w-64 max-sm:w-40" type="search" aria-label="Search available resources" placeholder="Search resources" value={resourceSearch} onChange={(event) => setResourceSearch(event.target.value)} /></div>
+        {availableResources.length ? <List>{availableResources.map((resource) => <ListItem key={resource.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${resource.filename} to this topic`} onClick={() => setSelectedTopicResources((current) => [...current, resource.id])}><FileText size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{resources.length === 0 ? "No resources uploaded yet." : resourceSearch ? "No matching resources." : "All resources selected."}</p>}
       </section>}
-    </div></div>}
-  </main>;
+    </Modal>}
+  </Page>;
 }

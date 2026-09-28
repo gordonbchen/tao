@@ -76,5 +76,5 @@ export function MarkdownMathText({ text, className }: { text: string; className?
   // CommonMark treats backslashes before parentheses and brackets as escapes.
   // Double them so MathJax still sees the TeX delimiters after Markdown parsing.
   const markdown = text.replace(/\\([()[\]])/g, "\\\\$1");
-  return <div ref={ref} className={className}><ReactMarkdown key={text}>{markdown}</ReactMarkdown></div>;
+  return <div ref={ref} className={["markdown", className].filter(Boolean).join(" ")}><ReactMarkdown key={text}>{markdown}</ReactMarkdown></div>;
 }

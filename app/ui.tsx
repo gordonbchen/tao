@@ -1,0 +1,133 @@
+"use client";
+
+// Shared UI primitives. Pages compose these and add only layout utilities.
+// Follow the UI style guide in AGENTS.md before adding a variant or a new primitive.
+import { useEffect, useRef, type ComponentProps, type ReactNode } from "react";
+import { X } from "lucide-react";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...classes: (string | false | null | undefined)[]) {
+  return twMerge(classes.filter(Boolean).join(" "));
+}
+
+const control = "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-55";
+const buttonVariants = {
+  primary: "border-primary bg-primary text-on-primary hover:enabled:border-primary-hover hover:enabled:bg-primary-hover",
+  secondary: "border-line bg-surface text-ink hover:enabled:border-line-strong hover:enabled:bg-hover",
+  ghost: "border-transparent bg-transparent text-ink hover:enabled:bg-hover",
+};
+const buttonSizes = { md: "h-control px-4", sm: "h-control-sm px-3" };
+
+type ButtonProps = ComponentProps<"button"> & { variant?: keyof typeof buttonVariants; size?: keyof typeof buttonSizes };
+
+export function Button({ variant = "secondary", size = "md", type = "button", className, ...props }: ButtonProps) {
+  return <button type={type} className={cn(control, buttonVariants[variant], buttonSizes[size], className)} {...props} />;
+}
+
+type IconButtonProps = Omit<ComponentProps<"button">, "aria-label"> & { label: string; tone?: "neutral" | "danger"; size?: "md" | "sm" | "xs" };
+const iconSizes = { md: "size-control", sm: "size-control-sm", xs: "size-6" };
+
+// Square icon-only button. `label` becomes both the accessible name and the tooltip.
+export function IconButton({ label, tone = "neutral", size = "md", type = "button", className, ...props }: IconButtonProps) {
+  return <button type={type} aria-label={label} title={label} className={cn(
+    "inline-flex flex-none items-center justify-center rounded-md text-muted transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+    tone === "danger" ? "hover:enabled:bg-danger-soft hover:enabled:text-danger" : "hover:enabled:bg-hover hover:enabled:text-ink",
+    iconSizes[size], className,
+  )} {...props} />;
+}
+
+const field = "min-w-0 rounded-md border border-line bg-surface text-ink transition-colors hover:border-line-strong disabled:cursor-not-allowed disabled:opacity-55";
+
+export function Input({ className, ...props }: ComponentProps<"input">) {
+  return <input className={cn(field, "h-control px-3 text-sm", className)} {...props} />;
+}
+
+export function Select({ className, ...props }: ComponentProps<"select">) {
+  return <select className={cn(field, "h-control px-3 text-sm", className)} {...props} />;
+}
+
+export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
+  return <textarea className={cn(field, "block w-full resize-y px-3 py-2 leading-relaxed", className)} {...props} />;
+}
+
+const badgeTones = { accent: "bg-accent-soft text-accent", neutral: "bg-subtle text-muted", danger: "bg-danger-soft text-danger" };
+
+export function Badge({ tone = "accent", className, ...props }: ComponentProps<"span"> & { tone?: keyof typeof badgeTones }) {
+  return <span className={cn("inline-flex flex-none items-center gap-1 rounded-full px-2 py-1 text-xs", badgeTones[tone], className)} {...props} />;
+}
+
+export function Spinner({ className }: { className?: string }) {
+  return <span aria-hidden className={cn("inline-block size-4 flex-none animate-spin rounded-full border-2 border-line border-t-accent", className)} />;
+}
+
+export function ErrorMessage({ className, ...props }: ComponentProps<"p">) {
+  return <p role="alert" className={cn("my-4 rounded-md border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger", className)} {...props} />;
+}
+
+export function Card({ className, ...props }: ComponentProps<"section">) {
+  return <section className={cn("rounded-lg border border-line bg-surface", className)} {...props} />;
+}
+
+export function Page({ className, ...props }: ComponentProps<"main">) {
+  return <main className={cn("mx-auto w-full max-w-4xl px-6 pt-12 pb-16 max-sm:px-4 max-sm:pt-6", className)} {...props} />;
+}
+
+type ModalProps = { title: ReactNode; label?: string; subtitle?: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode };
+
+// Dialog with a backdrop, title row, and close button. Escape and backdrop clicks close it.
+export function Modal({ title, label, subtitle, onClose, wide, children }: ModalProps) {
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close.current(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+  return <div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div role="dialog" aria-modal="true" aria-label={label ?? (typeof title === "string" ? title : undefined)} className={cn(
+      "w-full overflow-auto rounded-lg border border-line bg-paper p-6 shadow-float max-sm:p-4",
+      wide ? "max-h-[calc(100dvh-40px)] max-w-7xl" : "max-h-[90vh] max-w-lg",
+    )}>
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="min-w-0"><h2 className="text-xl font-semibold">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
+        <IconButton label="Close" onClick={onClose}><X size={20} /></IconButton>
+      </div>
+      {children}
+    </div>
+  </div>;
+}
+
+type Tab<T extends string> = { id: T; label: string; count?: number };
+
+// Underlined tab list with arrow-key navigation.
+export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string }) {
+  function move(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next = (index + step + tabs.length) % tabs.length;
+    onChange(tabs[next].id);
+    (event.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
+  }
+  return <div role="tablist" aria-label={label} className="-mt-2 mb-4 flex gap-6 border-b border-line">
+    {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
+      onClick={() => onChange(tab.id)} onKeyDown={event => move(event, index)}
+      className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
+      {tab.label}{tab.count !== undefined && <span className="text-xs text-muted">{tab.count.toLocaleString()}</span>}
+    </button>)}
+  </div>;
+}
+
+// Bordered row list used for subjects, topics, resources, and dialog choices.
+export function List({ className, ...props }: ComponentProps<"ul">) {
+  return <ul className={cn("border-t border-line", className)} {...props} />;
+}
+
+export function ListItem({ className, ...props }: ComponentProps<"li">) {
+  return <li className={cn("flex min-h-14 items-center gap-3 border-b border-line py-2", className)} {...props} />;
+}
+
+// Selectable option button (ratings, reasons). Pressed state is carried by aria-pressed.
+export function ToggleButton({ pressed, className, ...props }: ButtonProps & { pressed: boolean }) {
+  return <Button size="sm" aria-pressed={pressed} className={cn("aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:text-accent", className)} {...props} />;
+}

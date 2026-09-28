@@ -34,6 +34,7 @@ services:
       - ./db:/app/db
       - ./next.config.ts:/app/next.config.ts:ro
       - ./tsconfig.json:/app/tsconfig.json:ro
+      - ./postcss.config.mjs:/app/postcss.config.mjs:ro
       - next_build:/app/.next
       - uploads:/app/uploads
       - codex_socket:/run/tao-codex

@@ -69,7 +69,7 @@ npm run lint
 npm test
 ```
 
-With Docker Compose running, edits to files under `app/` hot reload. To tune the default answer height, edit `.answer-box { min-height: clamp(180px, 22vh, 280px); }` in `app/globals.css`; the study page's overall height is set by `.study-layout` nearby. Rebuild with the same Compose file and `up --build -d` after changing package dependencies, Docker configuration, or the Codex or Claude bridge. Restart the web container after adding a migration file, since migrations are checked once per process.
+With Docker Compose running, edits to files under `app/` hot reload. Styling uses Tailwind CSS v4: tokens are in `app/globals.css`, shared components in `app/ui.tsx`, and the UI style guide in `AGENTS.md`. Rebuild with the same Compose file and `up --build -d` after changing package dependencies, Docker configuration, or the Codex or Claude bridge. Restart the web container after adding a migration file, since migrations are checked once per process.
 
 See [AGENTS.md](AGENTS.md) for the product plan and development conventions. Production VPS deployment is planned but has not been configured yet.
 The topic coverage model and the remaining passage-level evidence plan are described in [docs/content-model.md](docs/content-model.md).

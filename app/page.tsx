@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { api, AppShell, LoadingCard, scheduleUndoDelete, Subject } from "./components";
+import { Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page } from "./ui";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -48,16 +49,20 @@ export default function DashboardPage() {
     });
   }
 
-  return <AppShell><main className="content home-content">
-    <div className="home-heading"><h1>Subjects</h1><button className="button button-primary" onClick={() => setShowCreate(true)}><Plus size={19} />New subject</button></div>
-    {error && !showCreate && <div className="error-message">{error}</div>}
-    {loading ? <LoadingCard /> : <div className="subjects-list">{subjects.map((subject) => <div className="subject-row" key={subject.id}><Link className="subject-link" href={`/subjects/${subject.id}`}>{subject.name}</Link><button className="subject-remove" type="button" aria-label={`Remove ${subject.name}`} title={`Remove ${subject.name}`} onClick={() => removeSubject(subject)}><Trash2 size={19} /></button></div>)}</div>}
-    {!loading && subjects.length === 0 && !error && <p className="quiet-empty">No subjects yet.</p>}
+  return <AppShell><Page>
+    <div className="mb-8 flex items-center justify-between gap-4"><h1 className="text-display font-semibold">Subjects</h1><Button variant="primary" onClick={() => setShowCreate(true)}><Plus size={19} />New subject</Button></div>
+    {error && !showCreate && <ErrorMessage>{error}</ErrorMessage>}
+    {loading ? <LoadingCard /> : subjects.length > 0 && <List>{subjects.map((subject) => <ListItem key={subject.id}>
+      <Link className="min-w-0 flex-1 truncate text-lg hover:text-accent" href={`/subjects/${subject.id}`}>{subject.name}</Link>
+      <IconButton label={`Remove ${subject.name}`} tone="danger" onClick={() => removeSubject(subject)}><Trash2 size={19} /></IconButton>
+    </ListItem>)}</List>}
+    {!loading && subjects.length === 0 && !error && <p className="text-muted">No subjects yet.</p>}
 
-    {showCreate && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}><form className="modal" onSubmit={createSubject}>
-      <div className="modal-head"><h2>New subject</h2><button type="button" className="modal-close" aria-label="Close" onClick={() => setShowCreate(false)}><X size={19} /></button></div>
-      <div className="field"><label htmlFor="subject-name">Name</label><input id="subject-name" autoFocus required maxLength={80} value={name} onChange={e => setName(e.target.value)} placeholder="Real Analysis" /></div>
-      {error && <div className="error-message">{error}</div>}<div className="modal-actions"><button type="button" className="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Creating…" : "Create"}</button></div>
-    </form></div>}
-  </main></AppShell>;
+    {showCreate && <Modal title="New subject" onClose={() => setShowCreate(false)}><form onSubmit={createSubject}>
+      <label className="mb-2 block text-sm font-semibold" htmlFor="subject-name">Name</label>
+      <Input className="w-full" id="subject-name" autoFocus required maxLength={80} value={name} onChange={e => setName(e.target.value)} placeholder="Real Analysis" />
+      {error && <ErrorMessage>{error}</ErrorMessage>}
+      <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setShowCreate(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={saving}>{saving ? "Creating…" : "Create"}</Button></div>
+    </form></Modal>}
+  </Page></AppShell>;
 }

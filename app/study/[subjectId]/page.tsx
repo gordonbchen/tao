@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleHelp, Send, ThumbsUp, TriangleAlert } from "lucide-react";
 import { api, AppShell, LoadingCard, notifyAiSetupRequired, Subject, useAISettings } from "../../components";
 import { MathText } from "../../math-text";
+import { Badge, Button, Card, cn, ErrorMessage, IconButton, Page, Spinner, Textarea, ToggleButton } from "../../ui";
 
 type Topic = { id: string; name: string };
 type Problem = { id: string; topicId: string; prompt: string; difficulty: string; isReview?: boolean };
@@ -156,36 +157,42 @@ function StudyContent() {
 
   const correctnessLabel = feedback?.correctness === "correct" ? "That’s right" : feedback?.correctness === "partial" ? "Good progress" : feedback?.correctness === "incorrect" ? "Let’s work through it" : "Let’s take a closer look";
   const FeedbackIcon = feedback?.correctness === "correct" ? CheckCircle2 : feedback?.correctness === "incorrect" ? TriangleAlert : feedback?.correctness === "uncertain" ? CircleHelp : ThumbsUp;
-  const problemFeedbackForm = showProblemFeedback && <form className="card skip-feedback" onSubmit={submitProblemFeedback}>
-    <div className="skip-feedback-heading">What should change? <span>Optional</span></div>
-    <div className="skip-reasons">{skipReasons.map(reason => <button key={reason.value} type="button" className={`skip-reason ${problemFeedbackTags.includes(reason.value) ? "selected" : ""}`} aria-pressed={problemFeedbackTags.includes(reason.value)} onClick={() => setProblemFeedbackTags(current => current.includes(reason.value) ? current.filter(tag => tag !== reason.value) : [...current, reason.value])}>{reason.label}</button>)}</div>
-    <textarea className="skip-note" rows={2} value={problemFeedbackNote} onChange={e => setProblemFeedbackNote(e.target.value)} maxLength={2000} placeholder="How could this problem be better?" />
-    <div className="skip-actions"><button type="button" className="button" onClick={() => setShowProblemFeedback(false)} disabled={savingProblemFeedback}>Cancel</button><button className="button button-primary" disabled={savingProblemFeedback}>{savingProblemFeedback ? <><span className="spinner" />Saving…</> : feedbackMode === "skip" ? "Skip and continue" : "Save feedback"}</button></div>
-  </form>;
+  const feedbackTone = feedback?.correctness === "correct" ? "border-success-line bg-success-soft" : feedback?.correctness === "incorrect" ? "border-danger-line bg-danger-soft" : "border-warning-line bg-warning-soft";
+  const textLink = "inline-flex items-center gap-2 text-sm text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-55";
+  const problemFeedbackForm = showProblemFeedback && <Card className="p-4"><form onSubmit={submitProblemFeedback}>
+    <div className="mb-3 text-sm font-semibold">What should change? <span className="font-normal text-muted">Optional</span></div>
+    <div className="mb-3 flex flex-wrap gap-2">{skipReasons.map(reason => <ToggleButton key={reason.value} pressed={problemFeedbackTags.includes(reason.value)} onClick={() => setProblemFeedbackTags(current => current.includes(reason.value) ? current.filter(tag => tag !== reason.value) : [...current, reason.value])}>{reason.label}</ToggleButton>)}</div>
+    <Textarea className="text-sm" rows={2} value={problemFeedbackNote} onChange={e => setProblemFeedbackNote(e.target.value)} maxLength={2000} placeholder="How could this problem be better?" />
+    <div className="mt-3 flex justify-end gap-2"><Button onClick={() => setShowProblemFeedback(false)} disabled={savingProblemFeedback}>Cancel</Button><Button type="submit" variant="primary" disabled={savingProblemFeedback}>{savingProblemFeedback ? <><Spinner />Saving…</> : feedbackMode === "skip" ? "Skip and continue" : "Save feedback"}</Button></div>
+  </form></Card>;
 
-  return <div className="content study-content">
-      <Link href={`/subjects/${subjectId}`} className="study-back"><ArrowLeft size={18} />{subject?.name || "Subject"}</Link>
+  return <Page className="max-w-6xl pt-8">
+      <Link href={`/subjects/${subjectId}`} className={cn(textLink, "mb-6")}><ArrowLeft size={18} />{subject?.name || "Subject"}</Link>
       {loading ? <LoadingCard /> : <>
-        {!problem ? <div className="empty-state">{generating ? <p><span className="spinner" /> Making a problem…</p> : <>
-          {error && <div className="error-message">{error}</div>}
-          {topics.length > 0 && <button className="button button-primary" onClick={() => ai.ready && ai.configured ? generate() : notifyAiSetupRequired()} disabled={working}>{working ? <><span className="spinner" />Making a problem…</> : ai.ready && ai.configured ? "Try again" : "Configure AI"}</button>}
-          <p><Link className="back-link" href={`/subjects/${subjectId}`}><ArrowLeft size={18} />Back to subject</Link></p>
-        </>}</div> : <div className="study-layout">
-          <div className="problem-column">
-            <section className="card problem-card"><div className="problem-meta"><span className="topic-chip">{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</span>{problem.isReview && <span className="review-chip">Review again</span>}<span className="difficulty-chip">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</span></div><MathText className="problem-prompt" text={problem.prompt} /></section>
-            {error && <div className="error-message">{error}</div>}
-            {!feedback ? <><form className="card answer-panel" onSubmit={submitAttempt}><textarea ref={answerInput} rows={4} className="answer-box" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
-              {answer.includes("\\(") || answer.includes("\\[") ? <div className="answer-preview"><span>Math preview</span><MathText className="answer-preview-content" text={answer} /></div> : null}
-              <div className="answer-control-row"><div className="difficulty-control"><div className="rating-label">Difficulty</div><div className="rating-row">{ratings.map(option => <button type="button" key={option.value} className={`rating-option ${rating === option.value ? "active" : ""}`} onClick={() => setRating(option.value)}>{option.label}</button>)}</div></div>
-                <button className="button button-primary answer-submit" disabled={!answer.trim() || working}>{working ? <><span className="spinner" />Checking…</> : <>Check answer <ArrowRight size={13} /></>}</button></div>
-            </form>
-              {!showProblemFeedback ? <button type="button" className="skip-question" onClick={() => openProblemFeedback("skip")} disabled={working}>Skip question</button> : problemFeedbackForm}</> : <><section className={`feedback-card ${feedback.correctness}`}><div className="feedback-title"><FeedbackIcon size={15} />{correctnessLabel}</div><MathText className="feedback-copy" text={feedback.feedback} />{feedback.solution && <button className="solution-toggle" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide worked solution" : "Show worked solution"}</button>}{showSolution && feedback.solution && <MathText className="math-block" text={feedback.solution} />}<div className="next-problem"><button className="button button-primary button-small" onClick={() => generate()} disabled={working}>{working ? <span className="spinner" /> : <>Try another problem <ArrowRight size={12} /></>}</button></div></section>
-                {problemFeedbackSaved && <p className="feedback-saved" role="status">Thanks, your feedback will guide future questions on this topic.</p>}
-                {!showProblemFeedback ? <button type="button" className="skip-question" onClick={() => openProblemFeedback("feedback")}>Give feedback on this problem</button> : problemFeedbackForm}
+        {!problem ? <div className="flex flex-col items-start gap-4 py-8">{generating ? <p className="inline-flex items-center gap-3 text-muted"><Spinner />Making a problem…</p> : <>
+          {error && <ErrorMessage className="w-full">{error}</ErrorMessage>}
+          {topics.length > 0 && <Button variant="primary" onClick={() => ai.ready && ai.configured ? generate() : notifyAiSetupRequired()} disabled={working}>{working ? <><Spinner />Making a problem…</> : ai.ready && ai.configured ? "Try again" : "Configure AI"}</Button>}
+          <Link className={textLink} href={`/subjects/${subjectId}`}><ArrowLeft size={18} />Back to subject</Link>
+        </>}</div> : <div className="grid grid-cols-[minmax(0,1fr)_minmax(280px,360px)] items-start gap-6 max-lg:grid-cols-1">
+          <div className="flex min-w-0 flex-col gap-4">
+            <Card className="p-6 max-sm:p-4"><div className="mb-4 flex flex-wrap gap-2"><Badge>{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</Badge>{problem.isReview && <Badge tone="neutral">Review again</Badge>}<Badge tone="neutral">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</Badge></div><MathText className="text-lg leading-relaxed whitespace-pre-wrap" text={problem.prompt} /></Card>
+            {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
+            {!feedback ? <><Card className="p-4"><form onSubmit={submitAttempt}><Textarea ref={answerInput} rows={4} className="min-h-32 border-0 px-0 hover:border-0" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
+              {answer.includes("\\(") || answer.includes("\\[") ? <div className="mt-2 border-t border-line pt-3"><span className="text-xs text-muted">Math preview</span><MathText className="mt-1 whitespace-pre-wrap" text={answer} /></div> : null}
+              <div className="mt-4 flex items-end justify-between gap-4 border-t border-line pt-4 max-sm:flex-col max-sm:items-stretch"><div><div className="mb-2 text-xs text-muted">Difficulty</div><div className="flex flex-wrap gap-2">{ratings.map(option => <ToggleButton key={option.value} pressed={rating === option.value} onClick={() => setRating(option.value)}>{option.label}</ToggleButton>)}</div></div>
+                <Button type="submit" variant="primary" disabled={!answer.trim() || working}>{working ? <><Spinner />Checking…</> : <>Check answer <ArrowRight size={16} /></>}</Button></div>
+            </form></Card>
+              {!showProblemFeedback ? <button type="button" className={cn(textLink, "self-start")} onClick={() => openProblemFeedback("skip")} disabled={working}>Skip question</button> : problemFeedbackForm}</> : <><section className={cn("rounded-lg border p-6 max-sm:p-4", feedbackTone)}><div className="mb-3 inline-flex items-center gap-2 font-semibold"><FeedbackIcon size={18} />{correctnessLabel}</div><MathText className="leading-relaxed whitespace-pre-wrap" text={feedback.feedback} />{feedback.solution && <button type="button" className={cn(textLink, "mt-4")} onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide worked solution" : "Show worked solution"}</button>}{showSolution && feedback.solution && <MathText className="mt-3 border-t border-line pt-3 leading-relaxed whitespace-pre-wrap" text={feedback.solution} />}<div className="mt-4 flex justify-end"><Button variant="primary" onClick={() => generate()} disabled={working}>{working ? <Spinner /> : <>Try another problem <ArrowRight size={16} /></>}</Button></div></section>
+                {problemFeedbackSaved && <p className="text-sm text-muted" role="status">Thanks, your feedback will guide future questions on this topic.</p>}
+                {!showProblemFeedback ? <button type="button" className={cn(textLink, "self-start")} onClick={() => openProblemFeedback("feedback")}>Give feedback on this problem</button> : problemFeedbackForm}
               </>}
           </div>
-          <aside className="card chat-card"><div className="chat-head"><strong>Ask for a hint</strong></div><div className="chat-messages">{messages.map((message, i) => <MathText key={i} className={`chat-msg ${message.role}`} text={message.text} />)}{chatBusy && <div className="chat-msg assistant"><span className="spinner" />Thinking…</div>}</div><div className="chat-suggestions"><button className="suggestion" onClick={() => askTutor(undefined, "Can I get a small hint?")} disabled={chatBusy}>Hint</button></div><form className="chat-input-wrap" onSubmit={askTutor}><textarea className="chat-input" rows={2} value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} placeholder="Where are you stuck?" /><button className="send-button" aria-label="Send message" disabled={!chatText.trim() || chatBusy}><Send size={17} /></button></form></aside>
+          <Card className="flex flex-col lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]"><div className="border-b border-line px-4 py-3 text-sm font-semibold">Ask for a hint</div>
+            <div className="flex min-h-24 flex-1 flex-col gap-3 overflow-auto p-4">{messages.map((message, i) => <MathText key={i} className={cn("max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap", message.role === "user" ? "self-end bg-accent-soft" : "self-start bg-subtle")} text={message.text} />)}{chatBusy && <div className="inline-flex items-center gap-2 self-start rounded-lg bg-subtle px-3 py-2 text-sm text-muted"><Spinner />Thinking…</div>}</div>
+            <div className="px-4 pb-2"><Button size="sm" onClick={() => askTutor(undefined, "Can I get a small hint?")} disabled={chatBusy}>Hint</Button></div>
+            <form className="flex items-end gap-2 border-t border-line p-3" onSubmit={askTutor}><Textarea className="text-sm" rows={2} value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} placeholder="Where are you stuck?" /><IconButton type="submit" label="Send message" className="text-accent" disabled={!chatText.trim() || chatBusy}><Send size={18} /></IconButton></form>
+          </Card>
         </div>}
       </>}
-    </div>;
+    </Page>;
 }

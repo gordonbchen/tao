@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { KeyRound, Moon, Sun, X } from "lucide-react";
+import { KeyRound, Moon, Sun } from "lucide-react";
+import { Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Select, Spinner } from "./ui";
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
@@ -95,7 +96,9 @@ function UndoToast() {
     return () => { undoListeners.delete(setState); };
   }, []);
   if (!state) return null;
-  return <div className="undo-toast" role="status"><span>{state.message}</span><button onClick={state.undo}>Undo</button></div>;
+  return <div role="status" className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-line bg-surface py-2 pr-2 pl-4 text-sm shadow-float">
+    <span>{state.message}</span><Button size="sm" onClick={state.undo}>Undo</Button>
+  </div>;
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -143,18 +146,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     document.documentElement.dataset.theme = next;
     localStorage.setItem("tao-theme", next);
   }
-  return <div className="app-frame">
-    <header className="site-header"><div className="site-header-inner">
-      <Link className="site-brand" href="/"><Image src="/icon.svg" alt="" width={30} height={30} /><span>Tao</span></Link>
-      <nav className="header-actions" aria-label="Site controls">
+  const usageLabel = usage.remainingPercent === null ? `${provider} allowance is unavailable` : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`;
+  return <div className="min-h-dvh">
+    <header className="border-b border-line bg-paper"><div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-6 max-sm:gap-2 max-sm:px-4">
+      <Link className="inline-flex flex-none items-center gap-2 text-lg font-semibold" href="/"><Image className="dark:invert" src="/icon.svg" alt="" width={30} height={30} /><span className="max-sm:hidden">Tao</span></Link>
+      <nav className="flex min-w-0 items-center gap-2 max-sm:gap-1" aria-label="Site controls">
         {status.available ? <>
-          <label className="model-control" title={`Select ${provider} model`}><span>{provider}</span><select aria-label="AI model" value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.id}</option>)}</select></label>
-          <div className="usage-meter" title={usage.remainingPercent === null ? `${provider} allowance is unavailable` : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
-            <span>Usage remaining</span><div className="usage-track"><div style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div><strong>{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
+          <label className="inline-flex min-w-0 items-center gap-2 text-sm text-muted" title={`Select ${provider} model`}><span className="max-sm:hidden">{provider}</span><Select className="max-w-48 max-sm:max-w-32" aria-label="AI model" value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.id}</option>)}</Select></label>
+          <div className="flex min-w-0 items-center gap-2 px-2 text-xs text-muted" title={usageLabel} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
+            <span className="max-md:hidden">Usage remaining</span>
+            <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-subtle"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
+            <strong className="font-semibold text-ink">{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
           </div>
-          <button type="button" aria-label="AI accounts" title="AI accounts" onClick={() => setAccountsOpen(true)}><KeyRound size={20} /></button>
-        </> : <button type="button" className="model-control" onClick={() => setAccountsOpen(true)}><KeyRound size={18} />Connect AI</button>}
-        <button type="button" aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</button>
+          <IconButton label="AI accounts" onClick={() => setAccountsOpen(true)}><KeyRound size={20} /></IconButton>
+        </> : <Button onClick={() => setAccountsOpen(true)}><KeyRound size={18} />Connect AI</Button>}
+        <IconButton label={theme === "dark" ? "Use light mode" : "Use dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</IconButton>
       </nav>
     </div></header>
     {children}{accountsOpen && <AIAccounts providers={status.providers} refresh={loadStatus} close={() => setAccountsOpen(false)} />}<UndoToast />
@@ -166,11 +172,6 @@ function AIAccounts({ providers, refresh, close }: { providers: AIProviderStatus
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [close]);
   // Device-code logins finish in the sidecar once the student approves in the browser.
   useEffect(() => {
     if (!signIn || signIn.needsCode) return;
@@ -189,24 +190,24 @@ function AIAccounts({ providers, refresh, close }: { providers: AIProviderStatus
       setError(caught instanceof Error ? caught.message : "Sign-in failed");
     } finally { setBusy(""); }
   }
-  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}><div className="modal" role="dialog" aria-modal="true" aria-label="AI accounts">
-    <div className="modal-head"><h2>AI accounts</h2><button className="modal-close" aria-label="Close" onClick={close}><X size={19} /></button></div>
-    <p className="accounts-note">Tao uses your own Codex or Claude subscription. Requests go to the provider&apos;s hosted models and count toward your plan&apos;s limits.</p>
-    <ul className="simple-list">{providers.map(provider => <li key={provider.id} className="account-row">
-      <div><strong>{provider.label}</strong><span>{!provider.running ? "Sidecar not running" : provider.signedIn ? "Signed in" : "Not signed in"}</span></div>
+  const link = (label: string, url: string) => <a className="text-accent underline" href={url} target="_blank" rel="noreferrer">Open the {label} sign-in page</a>;
+  return <Modal title="AI accounts" onClose={close}>
+    <p className="mb-4 text-sm text-muted">Tao uses your own Codex or Claude subscription. Requests go to the provider&apos;s hosted models and count toward your plan&apos;s limits.</p>
+    <List>{providers.map(provider => <ListItem key={provider.id} className="flex-wrap">
+      <div className="flex min-w-0 flex-1 flex-col"><strong className="font-semibold">{provider.label}</strong><span className="text-sm text-muted">{!provider.running ? "Sidecar not running" : provider.signedIn ? "Signed in" : "Not signed in"}</span></div>
       {provider.running && (provider.signedIn
-        ? <button className="button" disabled={busy === provider.id} onClick={() => void act(provider.id, "logout")}>Sign out</button>
-        : <button className="button button-primary" disabled={busy === provider.id} onClick={() => void act(provider.id, "start")}>{signIn?.provider === provider.id ? "Restart" : "Sign in"}</button>)}
-      {signIn?.provider === provider.id && <div className="account-signin">
+        ? <Button disabled={busy === provider.id} onClick={() => void act(provider.id, "logout")}>Sign out</Button>
+        : <Button variant="primary" disabled={busy === provider.id} onClick={() => void act(provider.id, "start")}>{signIn?.provider === provider.id ? "Restart" : "Sign in"}</Button>)}
+      {signIn?.provider === provider.id && <div className="w-full pb-2 text-sm leading-relaxed">
         {signIn.needsCode
-          ? <><p>1. <a href={signIn.url} target="_blank" rel="noreferrer">Open the {provider.label} sign-in page</a> and approve access.<br />2. Paste the code it shows:</p>
-            <form onSubmit={e => { e.preventDefault(); void act(provider.id, "code"); }}><input aria-label={`${provider.label} sign-in code`} value={code} onChange={e => setCode(e.target.value)} autoFocus /><button className="button button-primary" disabled={!code.trim() || busy === provider.id}>{busy === provider.id ? "Checking…" : "Finish"}</button></form></>
-          : <p>1. <a href={signIn.url} target="_blank" rel="noreferrer">Open the {provider.label} sign-in page</a>.<br />2. Enter this code: <code>{signIn.code}</code><br /><span className="account-wait"><span className="spinner" />Waiting for approval…</span></p>}
+          ? <><p>1. {link(provider.label, signIn.url)} and approve access.<br />2. Paste the code it shows:</p>
+            <form className="mt-2 flex gap-2" onSubmit={e => { e.preventDefault(); void act(provider.id, "code"); }}><Input className="flex-1" aria-label={`${provider.label} sign-in code`} value={code} onChange={e => setCode(e.target.value)} autoFocus /><Button type="submit" variant="primary" disabled={!code.trim() || busy === provider.id}>{busy === provider.id ? "Checking…" : "Finish"}</Button></form></>
+          : <p>1. {link(provider.label, signIn.url)}.<br />2. Enter this code: <code className="rounded-md bg-subtle px-2 py-1 font-mono">{signIn.code}</code><br /><span className="mt-2 inline-flex items-center gap-2 text-muted"><Spinner />Waiting for approval…</span></p>}
       </div>}
-    </li>)}</ul>
-    {!providers.some(provider => provider.running) && <p className="accounts-note">No AI sidecar is running. Start Tao with Docker Compose; see the README.</p>}
-    {error && <p className="error-message" role="alert">{error}</p>}
-  </div></div>;
+    </ListItem>)}</List>
+    {!providers.some(provider => provider.running) && <p className="mt-4 text-sm text-muted">No AI sidecar is running. Start Tao with Docker Compose; see the README.</p>}
+    {error && <ErrorMessage>{error}</ErrorMessage>}
+  </Modal>;
 }
 
-export function LoadingCard() { return <div className="loading-card"><span className="spinner" />Loading your learning space…</div>; }
+export function LoadingCard() { return <div className="flex items-center gap-3 py-6 text-sm text-muted"><Spinner />Loading your learning space…</div>; }
