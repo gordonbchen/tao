@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { createAuth } from "./auth.mjs";
 
 const socket = "/run/tao-codex/socket";
-const schemas = new Set(["problem", "feedback", "hint"]);
+const kinds = new Set(readdirSync("/bridge/schemas").map(file => file.replace(/\.json$/, "")));
 mkdirSync("/run/tao-codex", { recursive: true });
 rmSync(socket, { force: true });
 const auth = createAuth({
@@ -112,7 +112,7 @@ function accountUsage() {
 createServer(async (request, response) => {
     if (await auth.handle(request, response)) return;
     if (request.method === "GET" && request.url === "/usage") {
-      try { response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(await accountUsage())); }
+      try { const usage = await accountUsage(); response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(usage)); }
       catch { response.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Usage unavailable" })); }
       return;
     }
@@ -124,7 +124,7 @@ createServer(async (request, response) => {
       if (raw.length > 100_000) throw new Error("Request too large");
     }
     const { kind, system, input, model: requestedModel } = JSON.parse(raw);
-    if (!schemas.has(kind) && kind !== "resource_summary" && kind !== "topic_summary" && kind !== "topic_suggestions") throw new Error("Invalid request");
+    if (!kinds.has(kind)) throw new Error("Invalid request");
     if (typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
     if (requestedModel !== undefined && !["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"].includes(requestedModel)) throw new Error("Unsupported Codex model");
     const value = await infer(kind, system, input, requestedModel);

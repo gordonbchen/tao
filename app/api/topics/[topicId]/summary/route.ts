@@ -1,4 +1,4 @@
-import { aiOptionsFromRequest } from "@/lib/ai";
+import { aiErrorResponse, aiOptionsFromRequest, isAiSetupError } from "@/lib/ai";
 import { isUuid, jsonError, LOCAL_OWNER_ID, query } from "@/lib/db";
 import { summarizeTopic } from "@/lib/topic-summary";
 
@@ -21,13 +21,12 @@ export async function POST(request: Request, { params }: RouteContext) {
     await query("UPDATE topics SET summary_status = 'pending' WHERE id = $1", [topicId]);
     const generated = await summarizeTopic(topic.name, sources.rows.map((source) => ({ filename: source.filename, summary: source.modelSummary, extractedText: source.extractedText })), aiOptionsFromRequest(request), topic.coverageSummary);
     const saved = await query(`UPDATE topics SET coverage_summary = $2, summary_status = 'complete', summary_provider = $3,
-      summary_model = $4 WHERE id = $1 RETURNING id, name, coverage_summary AS "coverageSummary", summary_status AS "summaryStatus",
-      summary_provider AS "summaryProvider", summary_model AS "summaryModel"`, [topicId, generated.summary, generated.provider, generated.model]);
+      summary_model = $4, brief = $5 WHERE id = $1 RETURNING id, name, coverage_summary AS "coverageSummary", summary_status AS "summaryStatus",
+      summary_provider AS "summaryProvider", summary_model AS "summaryModel"`, [topicId, generated.summary, generated.provider, generated.model, generated.brief]);
     return Response.json(saved.rows[0]);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not summarize this topic";
-    const noProvider = /(codex|claude) is (unavailable|not signed in)/i.test(message);
+    const noProvider = isAiSetupError(error instanceof Error ? error.message : "");
     await query("UPDATE topics SET summary_status = $2 WHERE id = $1", [topicId, noProvider ? "not_generated" : "failed"]);
-    return jsonError(noProvider ? "Sign in to Codex or Claude to create a topic summary." : message, noProvider ? 503 : 502);
+    return aiErrorResponse(error, "create a topic summary");
   }
 }

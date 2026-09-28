@@ -1,4 +1,4 @@
-import { generateStructuredText, type AiOptions, type AiProvider } from "@/lib/ai";
+import { briefFrom, generateStructuredText, type AiOptions, type AiProvider } from "@/lib/ai";
 
 function splitText(text: string, maxChars = 18_000) {
   const chunks: string[] = [];
@@ -18,6 +18,7 @@ function splitText(text: string, maxChars = 18_000) {
 export async function summarizeResource(filename: string, extractedText: string, options?: AiOptions) {
   const chunks = splitText(extractedText);
   const summaries: string[] = [];
+  const briefs: string[] = [];
   let provider: AiProvider | undefined;
   let model: string | undefined;
   for (let start = 0; start < chunks.length; start += 2) {
@@ -26,7 +27,7 @@ export async function summarizeResource(filename: string, extractedText: string,
       const part = start + offset + 1;
       const { value, provider: usedProvider, model: usedModel } = await generateStructuredText(
         "resource_summary",
-        "Summarize this section of a course resource for a student. Preserve the important definitions, claims, methods, assumptions, examples, notation, and scope limits in this section. Be concise but cover all examinable information. Organize the result with a short heading and bullets. Preserve math using \\(...\\) inline and \\[...\\] for display. Do not add outside facts. Keep this section summary under about 2,500 characters. Return JSON with a single string property named summary.",
+        "Summarize this section of a course resource for a student. Preserve the important definitions, claims, methods, assumptions, examples, notation, and scope limits in this section. Be concise but cover all examinable information. Organize the result with a short heading and bullets. Preserve math using \\(...\\) inline and \\[...\\] for display. Do not add outside facts. Keep this section summary under about 2,500 characters. Also write a brief: one plain-text sentence under 200 characters naming the main concepts this section teaches, used to match it with course topics. Return JSON with string properties summary and brief.",
         JSON.stringify({ filename, part, totalParts: chunks.length, extractedText: chunk }),
         options,
       );
@@ -34,11 +35,13 @@ export async function summarizeResource(filename: string, extractedText: string,
         throw new Error("AI response did not contain a resource summary");
       }
       if (!provider) { provider = usedProvider; model = usedModel; }
-      return (value as { summary: string }).summary.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "").trim().slice(0, 3500);
+      return { summary: (value as { summary: string }).summary.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "").trim().slice(0, 3500), brief: briefFrom(value, 250) };
     }));
-    summaries.push(...results);
+    summaries.push(...results.map((result) => result.summary));
+    briefs.push(...results.map((result) => result.brief).filter(Boolean));
   }
-  const summary = summaries.map((part, index) => `## Part ${index + 1}\n${part}`).join("\n\n").slice(0, 45_000);
+  // Each section summary starts with its own heading.
+  const summary = summaries.join("\n\n").slice(0, 45_000);
   if (!summary) throw new Error("AI returned an empty resource summary");
-  return { summary, provider: provider!, model: model! };
+  return { summary, brief: briefs.join(" ").slice(0, 3000), provider: provider!, model: model! };
 }

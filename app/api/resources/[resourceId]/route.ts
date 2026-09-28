@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query } from "@/lib/db";
-import { aiOptionsFromRequest } from "@/lib/ai";
+import { aiErrorResponse, aiOptionsFromRequest, isAiSetupError } from "@/lib/ai";
 import { summarizeResource } from "@/lib/resource-summary";
 
 type RouteContext = { params: Promise<{ resourceId: string }> };
@@ -32,16 +32,15 @@ export async function POST(request: Request, { params }: RouteContext) {
     await query(`UPDATE resources SET summary_status = 'pending' WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID]);
     const generated = await summarizeResource(resource.filename, resource.extractedText, aiOptionsFromRequest(request));
     const saved = await query(`UPDATE resources SET model_summary = $3, summary_status = 'complete', summary_provider = $4,
-      summary_model = $5 WHERE id = $1 AND owner_id = $2
+      summary_model = $5, brief = $6 WHERE id = $1 AND owner_id = $2
       RETURNING id, filename, extracted_text AS "extractedText", extraction_status AS "extractionStatus",
         model_summary AS "modelSummary", summary_status AS "summaryStatus", summary_provider AS "summaryProvider", summary_model AS "summaryModel"`,
-    [resourceId, LOCAL_OWNER_ID, generated.summary, generated.provider, generated.model]);
+    [resourceId, LOCAL_OWNER_ID, generated.summary, generated.provider, generated.model, generated.brief]);
     return saved.rows[0] ? Response.json(saved.rows[0]) : jsonError("Resource not found", 404);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not summarize this resource";
-    const noProvider = /(codex|claude) is (unavailable|not signed in)/i.test(message);
+    const noProvider = isAiSetupError(error instanceof Error ? error.message : "");
     await query(`UPDATE resources SET summary_status = $3 WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID, noProvider ? "not_generated" : "failed"]);
-    return jsonError(noProvider ? "Sign in to Codex or Claude to create a resource summary." : message, noProvider ? 503 : 502);
+    return aiErrorResponse(error, "create a resource summary");
   }
 }
 

@@ -28,10 +28,13 @@ export async function PUT(request: Request, { params }: RouteContext) {
       const changed = [...removed.rows, ...added.rows].map((row) => row.topic_id);
       if (!changed.length) return [];
       const updated = await client.query<{ id: string; has_resources: boolean }>(`UPDATE topics t SET
-          coverage_summary = CASE WHEN EXISTS (SELECT 1 FROM topic_resources tr WHERE tr.topic_id = t.id) THEN coverage_summary ELSE '' END,
+          coverage_summary = CASE WHEN linked.has_resources THEN coverage_summary ELSE '' END,
+          brief = CASE WHEN linked.has_resources THEN brief ELSE '' END,
           summary_status = 'not_generated', summary_provider = NULL, summary_model = NULL
-        WHERE t.id = ANY($1::uuid[])
-        RETURNING t.id, EXISTS (SELECT 1 FROM topic_resources tr WHERE tr.topic_id = t.id) AS has_resources`, [changed]);
+        FROM (SELECT changed.id, EXISTS (SELECT 1 FROM topic_resources tr WHERE tr.topic_id = changed.id) AS has_resources
+          FROM unnest($1::uuid[]) AS changed(id)) linked
+        WHERE t.id = linked.id
+        RETURNING t.id, linked.has_resources`, [changed]);
       return updated.rows.filter((row) => row.has_resources).map((row) => row.id);
     });
     return Response.json({ topicIds, refreshTopicIds });

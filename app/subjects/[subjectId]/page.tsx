@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Pencil, Plus, Trash2, X, Check, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Pencil, Plus, Trash2, X, Check, Sparkles, type LucideIcon } from "lucide-react";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Select, Spinner, Tabs, Textarea } from "../../ui";
@@ -59,6 +59,7 @@ function SubjectContent() {
   const [topicSearch, setTopicSearch] = useState("");
   const [savingResourceIds, setSavingResourceIds] = useState<string[]>([]);
   const [resourceTopicsError, setResourceTopicsError] = useState("");
+  const [linkSuggestions, setLinkSuggestions] = useState<Record<string, LinkSuggestions>>({});
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -302,6 +303,16 @@ function SubjectContent() {
     finally { setSavingResourceIds((current) => current.filter((savingId) => savingId !== resourceId)); }
   }
 
+  // Asks the model for unlinked items that cover the same material, ranked by their short briefs.
+  function loadLinkSuggestions(key: string, url: string) {
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    if (linkSuggestions[key] === "loading") return;
+    setLinkSuggestions((current) => ({ ...current, [key]: "loading" }));
+    void api<{ ids: string[] }>(url, { method: "POST", headers: getAiRequestHeaders() })
+      .then((result) => setLinkSuggestions((current) => ({ ...current, [key]: result.ids })))
+      .catch(() => setLinkSuggestions((current) => ({ ...current, [key]: "failed" })));
+  }
+
   async function generateResourceSummary(resourceId: string) {
     if (!aiSettings.ready) return;
     if (!aiSettings.configured) {
@@ -394,7 +405,7 @@ function SubjectContent() {
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
           {caption("Model summary", resourceText.summaryProvider, resourceText.summaryModel)}
-          <MarkdownMathText className="max-w-3xl" text={resourceText.modelSummary} />
+          <MarkdownMathText text={resourceText.modelSummary} />
         </> : <div className="flex flex-col items-start gap-4 py-4">
           <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
           {resourceText.extractedText ? <Button variant="primary" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</Button> : noText}
@@ -403,8 +414,9 @@ function SubjectContent() {
         {resourceTopicsError && <ErrorMessage>{resourceTopicsError}</ErrorMessage>}
         <LinkPicker noun="topic" target="resource" icon={BookOpen} items={topics} saved={resourceText.topics.map((topic) => topic.id)}
           selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
+          suggestions={linkSuggestions[`resource:${resourceText.id}`]} onSuggest={() => loadLinkSuggestions(`resource:${resourceText.id}`, `/api/resources/${resourceText.id}/suggested-topics`)}
           saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
-      </section> : <section role="tabpanel" aria-label="Extracted text">{caption("Text extracted from this file")}{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
+      </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
 
     {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)}>
@@ -412,14 +424,14 @@ function SubjectContent() {
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
       {topicTab === "summary" ? <section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
-          {caption("Coverage summary", topicDetail.summaryProvider, topicDetail.summaryModel)}
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
-          {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText className="max-w-3xl" text={topicDetail.coverageSummary} />}
+          {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
         </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
       </section> : <section role="tabpanel" aria-label="Resources linked to topic">
         <LinkPicker noun="resource" target="topic" icon={FileText} items={resources.map((resource) => ({ id: resource.id, name: resource.filename }))} saved={topicDetail.resources.map((resource) => resource.id)}
           selected={selectedTopicResources} onSelectedChange={setSelectedTopicResources} search={resourceSearch} onSearchChange={setResourceSearch}
+          suggestions={linkSuggestions[`topic:${topicDetail.id}`]} onSuggest={() => loadLinkSuggestions(`topic:${topicDetail.id}`, `/api/topics/${topicDetail.id}/suggested-resources`)}
           saving={savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id)}
           savingLabel={savingTopicIds.includes(topicDetail.id) ? "Saving…" : "Summarizing…"} onSave={() => void saveTopicResources()} />
       </section>}
@@ -429,6 +441,8 @@ function SubjectContent() {
 
 const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";
 const choiceRow = "flex h-full min-h-12 w-full items-center gap-3 text-left text-sm hover:text-accent";
+
+type LinkSuggestions = string[] | "loading" | "failed";
 
 type LinkPickerProps = {
   noun: string;
@@ -440,21 +454,30 @@ type LinkPickerProps = {
   onSelectedChange: (ids: string[]) => void;
   search: string;
   onSearchChange: (search: string) => void;
+  suggestions?: LinkSuggestions;
+  onSuggest: () => void;
   saving: boolean;
   savingLabel?: string;
   onSave: () => void;
 };
 
 // Stages link changes between a topic and resources (or the reverse) until Save.
-function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
+function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, suggestions, onSuggest, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
   const query = search.trim().toLocaleLowerCase();
   const chosen = items.filter((item) => selected.includes(item.id));
-  const available = items.filter((item) => !selected.includes(item.id) && item.name.toLocaleLowerCase().includes(query));
+  const suggested = Array.isArray(suggestions) ? suggestions : [];
+  const rank = (id: string) => { const index = suggested.indexOf(id); return index < 0 ? suggested.length : index; };
+  const available = items.filter((item) => !selected.includes(item.id) && item.name.toLocaleLowerCase().includes(query))
+    .sort((a, b) => rank(a.id) - rank(b.id));
   const unchanged = [...selected].sort().join() === [...saved].sort().join();
   return <>
     <div className={sectionHead}><h3 className="text-lg font-semibold">Selected {noun}s</h3><Button variant="primary" disabled={saving || unchanged} onClick={onSave}>{saving ? savingLabel : "Save"}</Button></div>
     {chosen.length ? <List className="mb-8">{chosen.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Remove ${item.name} from this ${target}`} onClick={() => onSelectedChange(selected.filter((id) => id !== item.id))}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{saved.includes(item.id) ? <Badge tone="neutral">Saved</Badge> : <Badge>To add</Badge>}<Check size={18} className="flex-none text-accent" /></button></ListItem>)}</List> : <p className="mb-8 text-sm text-muted">No {noun}s selected.</p>}
-    <div className={sectionHead}><h3 className="text-lg font-semibold">Add {noun}s</h3><Input className="w-64 max-sm:w-40" type="search" aria-label={`Search available ${noun}s`} placeholder={`Search ${noun}s`} value={search} onChange={(event) => onSearchChange(event.target.value)} /></div>
-    {available.length ? <List>{available.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${item.name} to this ${target}`} onClick={() => onSelectedChange([...selected, item.id])}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{saved.includes(item.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{items.length === 0 ? `No ${noun}s yet.` : search ? `No matching ${noun}s.` : `All ${noun}s selected.`}</p>}
+    <div className={`${sectionHead} flex-wrap`}><h3 className="text-lg font-semibold">Add {noun}s</h3><div className="flex flex-wrap items-center justify-end gap-2">
+      {Array.isArray(suggestions) && !suggestions.some((id) => !selected.includes(id)) && <span className="text-sm text-muted max-sm:hidden">No clear matches</span>}
+      {suggestions === "failed" && <span className="text-sm text-danger max-sm:hidden">Suggestions failed</span>}
+      <Button disabled={suggestions === "loading" || items.length === selected.length} onClick={onSuggest} title={`Ask the model which ${noun}s cover the same material`}>{suggestions === "loading" ? <Spinner /> : <Sparkles size={16} />}{suggestions === "loading" ? "Suggesting…" : "Suggest"}</Button>
+      <Input className="w-64 max-sm:w-40" type="search" aria-label={`Search available ${noun}s`} placeholder={`Search ${noun}s`} value={search} onChange={(event) => onSearchChange(event.target.value)} /></div></div>
+    {available.length ? <List>{available.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${item.name} to this ${target}`} onClick={() => onSelectedChange([...selected, item.id])}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{suggested.includes(item.id) && <Badge><Sparkles size={12} />Suggested</Badge>}{saved.includes(item.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{items.length === 0 ? `No ${noun}s yet.` : search ? `No matching ${noun}s.` : `All ${noun}s selected.`}</p>}
   </>;
 }

@@ -109,8 +109,26 @@ export async function suggestHint(problem: { prompt: string; solution: string },
   return typeof value.hint === "string" ? value.hint.slice(0, 1200) : undefined;
 }
 
-export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "topic_suggestions", system: string, input: string, options: AiOptions = {}) {
+export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "topic_suggestions" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
   return jsonFromConfiguredProvider<unknown>(system, input, kind, options);
 }
 import { request as httpRequest } from "node:http";
 import { existsSync } from "node:fs";
+import { jsonError } from "@/lib/db";
+
+// Maps AI failures to a sign-in notice (503) or the provider's message (502).
+export function aiErrorResponse(error: unknown, action: string) {
+  const message = error instanceof Error ? error.message : `Could not ${action}`;
+  if (isAiSetupError(message)) return jsonError(`Sign in to Codex or Claude to ${action}.`, 503);
+  return jsonError(message, 502);
+}
+
+export function isAiSetupError(message: string) {
+  return /(codex|claude) is (unavailable|not signed in)/i.test(message);
+}
+
+// Reads the short relevance description returned alongside a summary.
+export function briefFrom(value: unknown, limit: number) {
+  const brief = value && typeof value === "object" ? (value as { brief?: unknown }).brief : undefined;
+  return typeof brief === "string" ? brief.replace(/\s+/g, " ").trim().slice(0, limit) : "";
+}

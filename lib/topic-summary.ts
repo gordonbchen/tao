@@ -1,4 +1,4 @@
-import { generateStructuredText, type AiOptions } from "@/lib/ai";
+import { briefFrom, generateStructuredText, type AiOptions } from "@/lib/ai";
 
 type TopicSource = { filename: string; summary: string; extractedText: string };
 
@@ -52,7 +52,7 @@ export async function summarizeTopic(topicName: string, sources: TopicSource[], 
 
   const { value, provider, model } = await generateStructuredText(
     "topic_summary",
-    "Update an accurate, concise coverage summary for a student's course topic using only the linked source material. Include the definitions, results, assumptions, methods, notation, and representative examples that are relevant to this topic. Preserve accurate student edits and useful organization from the previous summary where supported by the current sources. Omit unrelated material and remove claims no longer supported by linked sources. Do not add outside facts. Preserve mathematical notation with \\( ... \\) inline and \\[ ... \\] for display. Return JSON with one string property named summary.",
+    "Update an accurate, concise coverage summary for a student's course topic using only the linked source material. Include the definitions, results, assumptions, methods, notation, and representative examples that are relevant to this topic. Preserve accurate student edits and useful organization from the previous summary where supported by the current sources. Omit unrelated material and remove claims no longer supported by linked sources. Do not add outside facts. Preserve mathematical notation with \\( ... \\) inline and \\[ ... \\] for display. Also write a brief: one or two plain-text sentences under 300 characters naming what this topic covers, used to match it with course resources. Return JSON with string properties summary and brief.",
     JSON.stringify({ topic: topicName, previousSummary: previousSummary.slice(0, 16_000), linkedSources: context }),
     options,
   );
@@ -61,5 +61,5 @@ export async function summarizeTopic(topicName: string, sources: TopicSource[], 
   }
   const summary = (value as { summary: string }).summary.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "").trim().slice(0, 16_000);
   if (!summary) throw new Error("AI returned an empty topic summary");
-  return { summary, provider, model };
+  return { summary, brief: briefFrom(value, 300), provider, model };
 }

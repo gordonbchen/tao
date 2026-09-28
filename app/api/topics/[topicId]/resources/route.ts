@@ -47,7 +47,7 @@ export async function PUT(request: Request, { params }: RouteContext) {
       if (linksChanged) {
         await client.query(resourceIds.length
           ? `UPDATE topics SET summary_status = 'not_generated', summary_provider = NULL, summary_model = NULL WHERE id = $1`
-          : `UPDATE topics SET coverage_summary = '', summary_status = 'not_generated', summary_provider = NULL, summary_model = NULL WHERE id = $1`, [topicId]);
+          : `UPDATE topics SET coverage_summary = '', brief = '', summary_status = 'not_generated', summary_provider = NULL, summary_model = NULL WHERE id = $1`, [topicId]);
       }
       return linksChanged;
     });
