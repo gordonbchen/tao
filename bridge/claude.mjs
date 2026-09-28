@@ -50,8 +50,38 @@ function infer(kind, system, input, requestedModel) {
   });
 }
 
+// Claude CLI has no usage command; its subscription login can read the account's
+// 5-hour and weekly windows. Report the most used one, like the Codex bridge.
+async function accountUsage() {
+  const { accessToken } = JSON.parse(readFileSync("/claude-auth/.credentials.json", "utf8")).claudeAiOauth ?? {};
+  if (!accessToken) throw new Error("Usage unavailable");
+  const reply = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    headers: { Authorization: `Bearer ${accessToken}`, "anthropic-beta": "oauth-2025-04-20" },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!reply.ok) throw new Error("Usage unavailable");
+  const data = await reply.json();
+  const windows = [[data.five_hour, 300], [data.seven_day, 10_080]]
+    .filter(([window]) => Number.isFinite(window?.utilization))
+    .sort(([a], [b]) => b.utilization - a.utilization);
+  if (!windows.length) throw new Error("Usage unavailable");
+  const [window, windowDurationMins] = windows[0];
+  const resetsAt = Date.parse(window.resets_at);
+  return {
+    usedPercent: Math.min(100, Math.max(0, Math.round(window.utilization))),
+    windowDurationMins,
+    resetsAt: Number.isFinite(resetsAt) ? Math.floor(resetsAt / 1000) : null,
+    lifetimeTokens: null,
+  };
+}
+
 createServer(async (request, response) => {
   if (await auth.handle(request, response)) return;
+  if (request.method === "GET" && request.url === "/usage") {
+    try { response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(await accountUsage())); }
+    catch { response.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Usage unavailable" })); }
+    return;
+  }
   if (request.method !== "POST" || request.url !== "/infer") { response.writeHead(404).end(); return; }
   try {
     let raw = "";

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Pencil, Plus, Trash2, X, Check, Unlink } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Pencil, Plus, Trash2, X, Check, type LucideIcon } from "lucide-react";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Select, Spinner, Tabs, Textarea } from "../../ui";
@@ -46,7 +46,7 @@ function SubjectContent() {
   const suggestions = suggestionQueue[0] ?? null;
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
-  const [resourceTab, setResourceTab] = useState<"summary" | "extracted">("summary");
+  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
   const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
   const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
@@ -55,7 +55,10 @@ function SubjectContent() {
   const [selectedTopicResources, setSelectedTopicResources] = useState<string[]>([]);
   const [resourceSearch, setResourceSearch] = useState("");
   const [savingTopicIds, setSavingTopicIds] = useState<string[]>([]);
-  const [resourceTopicChoice, setResourceTopicChoice] = useState("");
+  const [selectedResourceTopics, setSelectedResourceTopics] = useState<string[]>([]);
+  const [topicSearch, setTopicSearch] = useState("");
+  const [savingResourceIds, setSavingResourceIds] = useState<string[]>([]);
+  const [resourceTopicsError, setResourceTopicsError] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -187,6 +190,9 @@ function SubjectContent() {
     try {
       const detail = await api<ResourceText>(`/api/resources/${resource.id}`);
       setResourceText(detail);
+      setSelectedResourceTopics(detail.topics.map((topic) => topic.id));
+      setTopicSearch("");
+      setResourceTopicsError("");
       setResourceTab("summary");
       if (detail.summaryStatus === "not_generated" || detail.summaryStatus === "failed") void generateResourceSummary(resource.id);
     }
@@ -278,27 +284,22 @@ function SubjectContent() {
     } catch (e) { setTopicSummaryError(topicId, e instanceof Error ? e.message : "Could not save topic summary"); }
   }
 
-  async function attachResource(topicId: string, resourceId: string) {
-    if (!resourceId) return;
+  async function saveResourceTopics() {
+    if (!resourceText || savingResourceIds.includes(resourceText.id)) return;
+    const resourceId = resourceText.id;
+    const topicIds = [...selectedResourceTopics];
+    setSavingResourceIds((current) => [...current, resourceId]);
+    setResourceTopicsError("");
     try {
-      await api(`/api/topics/${topicId}/resources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceId }) });
-      await refreshTopic(topicId);
-      setResources((current) => current.map((resource) => resource.id === resourceId ? { ...resource, topicIds: [...new Set([...(resource.topicIds ?? []), topicId])] } : resource));
-      setResourceText((current) => current ? { ...current, topics: current.topics.some((topic) => topic.id === topicId) ? current.topics : [...current.topics, { id: topicId, name: topics.find((topic) => topic.id === topicId)?.name ?? "Topic" }] } : current);
-      setResourceTopicChoice("");
-      void generateTopicSummary(topicId);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not link resource"); }
-  }
-
-  async function unlinkResource(topicId: string, resourceId: string) {
-    try {
-      await api(`/api/topics/${topicId}/resources/${resourceId}`, { method: "DELETE" });
-      const detail = await api<TopicDetail>(`/api/topics/${topicId}`);
-      if (topicDetail?.id === topicId) { setTopicDetail(detail); setSelectedTopicResources(detail.resources.map((resource) => resource.id)); }
-      setResources((current) => current.map((resource) => resource.id === resourceId ? { ...resource, topicIds: (resource.topicIds ?? []).filter((id) => id !== topicId) } : resource));
-      setResourceText((current) => current ? { ...current, topics: current.topics.filter((topic) => topic.id !== topicId) } : current);
-      if (detail.resources.length) void generateTopicSummary(topicId);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not unlink resource"); }
+      const result = await api<{ refreshTopicIds: string[] }>(`/api/resources/${resourceId}/topics`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topicIds }),
+      });
+      const linked = topics.filter((topic) => topicIds.includes(topic.id)).map(({ id, name }) => ({ id, name }));
+      setResourceText((current) => current?.id === resourceId ? { ...current, topics: linked } : current);
+      setResources((current) => current.map((resource) => resource.id === resourceId ? { ...resource, topicIds } : resource));
+      for (const topicId of result.refreshTopicIds) void generateTopicSummary(topicId);
+    } catch (e) { setResourceTopicsError(e instanceof Error ? e.message : "Could not save linked topics"); }
+    finally { setSavingResourceIds((current) => current.filter((savingId) => savingId !== resourceId)); }
   }
 
   async function generateResourceSummary(resourceId: string) {
@@ -348,16 +349,10 @@ function SubjectContent() {
     }
   }
 
-  const selectedResources = resources.filter((resource) => selectedTopicResources.includes(resource.id));
-  const availableResources = resources.filter((resource) => !selectedTopicResources.includes(resource.id)
-    && resource.filename.toLocaleLowerCase().includes(resourceSearch.trim().toLocaleLowerCase()));
-
   const caption = (label: string, provider?: string | null, model?: string | null) => <p className="mb-3 text-xs text-muted">{label}{provider ? ` · ${provider}${model ? ` · ${model}` : ""}` : ""}</p>;
   const pending = (text: string, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-3 py-6 text-muted"><Spinner />{text}{action}</div>;
   const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
-  const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";
   const rowTitle = "flex min-w-0 flex-1 items-center gap-3 self-stretch text-left hover:text-accent disabled:cursor-wait";
-  const choiceRow = "flex h-full min-h-12 w-full items-center gap-3 text-left text-sm hover:text-accent";
   const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
 
   return <Page>
@@ -394,10 +389,7 @@ function SubjectContent() {
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
-      <div className="mb-6 flex flex-wrap items-center gap-2"><span className="mr-1 text-sm text-muted">Topics</span>{resourceText.topics.map((topic) => <Badge className="h-control-sm py-0 pr-1" key={topic.id}>{topic.name}<IconButton size="xs" label={`Unlink ${topic.name}`} className="text-accent" onClick={() => void unlinkResource(topic.id, resourceText.id)}><Unlink size={14} /></IconButton></Badge>)}
-        {topics.some((topic) => !resourceText.topics.some((linked) => linked.id === topic.id)) && <div className="flex items-center gap-2"><Select className="h-control-sm" aria-label="Topic to link" value={resourceTopicChoice} onChange={(event) => setResourceTopicChoice(event.target.value)}><option value="">Link to topic…</option>{topics.filter((topic) => !resourceText.topics.some((linked) => linked.id === topic.id)).map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}</Select><Button size="sm" disabled={!resourceTopicChoice} onClick={() => void attachResource(resourceTopicChoice, resourceText.id)}><Plus size={16} />Link</Button></div>}
-      </div>
-      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
+      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
       {resourceTab === "summary" ? <section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
@@ -407,6 +399,11 @@ function SubjectContent() {
           <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
           {resourceText.extractedText ? <Button variant="primary" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</Button> : noText}
         </div>}
+      </section> : resourceTab === "topics" ? <section role="tabpanel" aria-label="Topics linked to resource">
+        {resourceTopicsError && <ErrorMessage>{resourceTopicsError}</ErrorMessage>}
+        <LinkPicker noun="topic" target="resource" icon={BookOpen} items={topics} saved={resourceText.topics.map((topic) => topic.id)}
+          selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
+          saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
       </section> : <section role="tabpanel" aria-label="Extracted text">{caption("Text extracted from this file")}{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
 
@@ -421,11 +418,43 @@ function SubjectContent() {
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
         </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
       </section> : <section role="tabpanel" aria-label="Resources linked to topic">
-        <div className={sectionHead}><h3 className="text-lg font-semibold">Selected resources</h3><Button variant="primary" disabled={savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id) || [...selectedTopicResources].sort().join() === topicDetail.resources.map((resource) => resource.id).sort().join()} onClick={() => void saveTopicResources()}>{savingTopicIds.includes(topicDetail.id) ? "Saving…" : summarizingTopicIds.includes(topicDetail.id) ? "Summarizing…" : "Save"}</Button></div>
-        {selectedResources.length ? <List className="mb-8">{selectedResources.map((resource) => <ListItem key={resource.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Remove ${resource.filename} from this topic`} onClick={() => setSelectedTopicResources((current) => current.filter((resourceId) => resourceId !== resource.id))}><FileText size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) ? <Badge tone="neutral">Saved</Badge> : <Badge>To add</Badge>}<Check size={18} className="flex-none text-accent" /></button></ListItem>)}</List> : <p className="mb-8 text-sm text-muted">No resources selected.</p>}
-        <div className={sectionHead}><h3 className="text-lg font-semibold">Add resources</h3><Input className="w-64 max-sm:w-40" type="search" aria-label="Search available resources" placeholder="Search resources" value={resourceSearch} onChange={(event) => setResourceSearch(event.target.value)} /></div>
-        {availableResources.length ? <List>{availableResources.map((resource) => <ListItem key={resource.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${resource.filename} to this topic`} onClick={() => setSelectedTopicResources((current) => [...current, resource.id])}><FileText size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{resource.filename}</span>{topicDetail.resources.some((saved) => saved.id === resource.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{resources.length === 0 ? "No resources uploaded yet." : resourceSearch ? "No matching resources." : "All resources selected."}</p>}
+        <LinkPicker noun="resource" target="topic" icon={FileText} items={resources.map((resource) => ({ id: resource.id, name: resource.filename }))} saved={topicDetail.resources.map((resource) => resource.id)}
+          selected={selectedTopicResources} onSelectedChange={setSelectedTopicResources} search={resourceSearch} onSearchChange={setResourceSearch}
+          saving={savingTopicIds.includes(topicDetail.id) || summarizingTopicIds.includes(topicDetail.id)}
+          savingLabel={savingTopicIds.includes(topicDetail.id) ? "Saving…" : "Summarizing…"} onSave={() => void saveTopicResources()} />
       </section>}
     </Modal>}
   </Page>;
+}
+
+const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";
+const choiceRow = "flex h-full min-h-12 w-full items-center gap-3 text-left text-sm hover:text-accent";
+
+type LinkPickerProps = {
+  noun: string;
+  target: string;
+  icon: LucideIcon;
+  items: { id: string; name: string }[];
+  saved: string[];
+  selected: string[];
+  onSelectedChange: (ids: string[]) => void;
+  search: string;
+  onSearchChange: (search: string) => void;
+  saving: boolean;
+  savingLabel?: string;
+  onSave: () => void;
+};
+
+// Stages link changes between a topic and resources (or the reverse) until Save.
+function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
+  const query = search.trim().toLocaleLowerCase();
+  const chosen = items.filter((item) => selected.includes(item.id));
+  const available = items.filter((item) => !selected.includes(item.id) && item.name.toLocaleLowerCase().includes(query));
+  const unchanged = [...selected].sort().join() === [...saved].sort().join();
+  return <>
+    <div className={sectionHead}><h3 className="text-lg font-semibold">Selected {noun}s</h3><Button variant="primary" disabled={saving || unchanged} onClick={onSave}>{saving ? savingLabel : "Save"}</Button></div>
+    {chosen.length ? <List className="mb-8">{chosen.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Remove ${item.name} from this ${target}`} onClick={() => onSelectedChange(selected.filter((id) => id !== item.id))}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{saved.includes(item.id) ? <Badge tone="neutral">Saved</Badge> : <Badge>To add</Badge>}<Check size={18} className="flex-none text-accent" /></button></ListItem>)}</List> : <p className="mb-8 text-sm text-muted">No {noun}s selected.</p>}
+    <div className={sectionHead}><h3 className="text-lg font-semibold">Add {noun}s</h3><Input className="w-64 max-sm:w-40" type="search" aria-label={`Search available ${noun}s`} placeholder={`Search ${noun}s`} value={search} onChange={(event) => onSearchChange(event.target.value)} /></div>
+    {available.length ? <List>{available.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${item.name} to this ${target}`} onClick={() => onSelectedChange([...selected, item.id])}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{saved.includes(item.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{items.length === 0 ? `No ${noun}s yet.` : search ? `No matching ${noun}s.` : `All ${noun}s selected.`}</p>}
+  </>;
 }
