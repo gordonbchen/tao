@@ -148,11 +148,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
   const usageLabel = usage.remainingPercent === null ? `${provider} allowance is unavailable` : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`;
   return <div className="min-h-dvh">
-    <header className="border-b border-line bg-paper"><div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-6 max-sm:gap-2 max-sm:px-4">
+    <header className="border-b border-line bg-paper"><div className="flex h-16 w-full items-center justify-between gap-4 px-6 max-sm:gap-2 max-sm:px-4">
       <Link className="inline-flex flex-none items-center gap-2 text-lg font-semibold" href="/"><Image className="dark:invert" src="/icon.svg" alt="" width={30} height={30} /><span className="max-sm:hidden">Tao</span></Link>
       <nav className="flex min-w-0 items-center gap-2 max-sm:gap-1" aria-label="Site controls">
         {status.available ? <>
-          <label className="inline-flex min-w-0 items-center gap-2 text-sm text-muted" title={`Select ${provider} model`}><span className="max-sm:hidden">{provider}</span><Select className="max-w-48 max-sm:max-w-32" aria-label="AI model" value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.id}</option>)}</Select></label>
+          <Select className="min-w-0 max-w-64 max-sm:max-w-32" aria-label="AI model" title={`Select ${provider} model`} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.provider} · {option.id}</option>)}</Select>
           <div className="flex min-w-0 items-center gap-2 px-2 text-xs text-muted" title={usageLabel} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
             <span className="max-md:hidden">Usage remaining</span>
             <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-subtle"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
