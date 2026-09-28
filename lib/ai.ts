@@ -113,7 +113,7 @@ export async function suggestHint(problem: { prompt: string; solution: string },
   return typeof value.hint === "string" ? value.hint.slice(0, 1200) : undefined;
 }
 
-export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "topic_suggestions" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
+export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "group_summary" | "topic_placements" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
   return jsonFromConfiguredProvider<unknown>(system, input, kind, options);
 }
 import { request as httpRequest } from "node:http";

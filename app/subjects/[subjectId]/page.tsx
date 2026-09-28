@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Pencil, Plus, Trash2, X, Check, Sparkles, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
+import { buildTree, descendantGroupIds, flattenTree, groupPath, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Select, Spinner, Tabs, Textarea } from "../../ui";
+import { TopicTree, type Group, type Topic, type TreeActions } from "./topic-tree";
 
-type Topic = { id: string; name: string; summaryStatus?: string };
-type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: string[] };
+type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: Placement[] };
 type LinkedTopic = { id: string; name: string };
 type LinkedResource = { id: string; filename: string };
+type GroupDetail = Group & { summary: string; summaryStatus: "not_generated" | "stale" | "complete"; summaryProvider?: string | null; summaryModel?: string | null; topicCount: number; resources: LinkedResource[] };
 type TopicDetail = Topic & { subjectId: string; coverageSummary: string; summaryProvider?: string | null; summaryModel?: string | null; resources: LinkedResource[] };
 type ResourceText = Resource & {
   extractedText: string;
@@ -33,22 +35,31 @@ function SubjectContent() {
   const aiSettings = useAISettings();
   const [subject, setSubject] = useState<Subject | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [organizing, setOrganizing] = useState<{ topics: (Topic & { path: string[] })[] } | "loading" | null>(null);
+  const [previewCollapsed, setPreviewCollapsed] = useState<Set<string>>(new Set());
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [topicName, setTopicName] = useState("");
-  const [selectedTopic, setSelectedTopic] = useState("");
-  const [editingTopic, setEditingTopic] = useState<string | null>(null);
-  const [editedName, setEditedName] = useState("");
+  // Practice selection: "" for any topic, "topic:<id>", or "group:<id>".
+  const [practice, setPractice] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
-  const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: string[] }[]>([]);
+  const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: Placement[] }[]>([]);
   const suggestions = suggestionQueue[0] ?? null;
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
   const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
   const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
+  const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
+  const [groupTab, setGroupTab] = useState<"summary" | "resources">("summary");
+  const [summarizingGroupIds, setSummarizingGroupIds] = useState<string[]>([]);
+  const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
   const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
   const [topicSummaryErrors, setTopicSummaryErrors] = useState<Record<string, string>>({});
   const [topicEditingSummary, setTopicEditingSummary] = useState(false);
@@ -68,17 +79,37 @@ function SubjectContent() {
   const summariesQueued = useRef(new Set<string>());
 
   useEffect(() => { activeTopicIdRef.current = topicDetail?.id ?? null; }, [topicDetail?.id]);
+  const activeGroupIdRef = useRef<string | null>(null);
+  useEffect(() => { activeGroupIdRef.current = groupDetail?.id ?? null; }, [groupDetail?.id]);
+
+  // Collapsed folders are a per-browser convenience, so they live in localStorage.
+  const collapsedKey = `tao-collapsed-folders-${id}`;
+  useEffect(() => {
+    try { setCollapsed(new Set(JSON.parse(localStorage.getItem(collapsedKey) ?? "[]"))); } catch { /* Start expanded. */ }
+  }, [collapsedKey]);
+  function toggleFolder(groupId: string, open?: boolean) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (open ?? next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      try { localStorage.setItem(collapsedKey, JSON.stringify([...next])); } catch { /* Keep it for this visit only. */ }
+      return next;
+    });
+  }
+  function flash(itemId: string) {
+    setHighlightId(itemId);
+    setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
+  }
   function setTopicSummaryError(topicId: string, message: string) {
     setTopicSummaryErrors((current) => ({ ...current, [topicId]: message }));
   }
 
   const refresh = useCallback(async () => {
     try {
-      const detail = await api<{ subject: Subject; topics: Topic[]; resources: Resource[] }>(`/api/subjects/${id}`);
+      const detail = await api<{ subject: Subject; topics: Topic[]; groups: Group[]; resources: Resource[] }>(`/api/subjects/${id}`);
       setSubject(detail.subject);
       setTopics((detail.topics ?? []).filter((topic) => !isPendingRemoval(topic.id)));
+      setGroups((detail.groups ?? []).filter((group) => !isPendingRemoval(group.id)));
       setResources((detail.resources ?? []).filter((resource) => !isPendingRemoval(resource.id)));
-      setSelectedTopic((current) => current && detail.topics.some((topic) => topic.id === current && !isPendingRemoval(topic.id)) ? current : "");
       document.title = `Tao - ${detail.subject.name}`;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load subject");
@@ -99,44 +130,23 @@ function SubjectContent() {
     };
   }, [refresh]);
 
-  // In an open topic or resource: Tab cycles its tabs, and Left/Right open the previous or next item.
-  // Up/Down keep scrolling, and keys typed into fields behave normally.
-  useEffect(() => {
-    if (!resourceText && !topicDetail) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-      if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
-      if (event.key === "Tab") {
-        event.preventDefault();
-        const step = event.shiftKey ? -1 : 1;
-        if (resourceText) setResourceTab((tab) => cycle(resourceTabs, tab, step));
-        else setTopicTab((tab) => cycle(topicTabs, tab, step));
-      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        const step = event.key === "ArrowRight" ? 1 : -1;
-        if (resourceText) {
-          const current = resources.find((item) => item.id === resourceText.id);
-          const next = current && cycle(resources, current, step);
-          if (next && next !== current && !resourceTextLoading) void showResourceText(next, true);
-        } else if (topicDetail) {
-          const current = topics.find((item) => item.id === topicDetail.id);
-          const next = current && cycle(topics, current, step);
-          if (next && next !== current) void showTopic(next, true);
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  // The tree drops topics and folders inside a removed folder, so everything below derives from it.
+  const tree = flattenTree(buildTree(groups, topics));
+  const visibleTopics = tree.flatMap((node) => node.kind === "topic" ? [node.topic] : []);
+  const visibleGroups = tree.flatMap((node) => node.kind === "group" ? [node.group] : []);
+  const practiceTarget = practice.startsWith("topic:") ? { topicId: practice.slice(6) } : practice.startsWith("group:") ? { groupId: practice.slice(6) } : {};
+  const practiceValid = !practice || tree.some((node) => practice === (node.kind === "topic" ? `topic:${node.topic.id}` : `group:${node.group.id}`));
+  useEffect(() => { if (!practiceValid) setPractice(""); }, [practiceValid]);
 
   // Have one practice problem generated and waiting so Practice opens without a delay.
   const hasTopics = topics.length > 0;
   useEffect(() => {
     if (!aiSettings.configured || !hasTopics) return;
+    const [kind, targetId] = practice.split(":");
     void fetch(`/api/subjects/${id}/problems/ready`, {
-      method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(selectedTopic ? { topicId: selectedTopic } : {}),
+      method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(targetId ? { [`${kind}Id`]: targetId } : {}),
     }).catch(() => {});
-  }, [id, aiSettings.configured, hasTopics, selectedTopic]);
+  }, [id, aiSettings.configured, hasTopics, practice]);
 
   async function addTopic(event: React.FormEvent) {
     event.preventDefault();
@@ -145,9 +155,10 @@ function SubjectContent() {
     setBusy(true);
     setError("");
     try {
-      await api(`/api/subjects/${id}/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name }) });
       setTopicName("");
       await refresh();
+      revealAndFlash(topic.id, topic.groupId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add topic");
     } finally {
@@ -155,27 +166,126 @@ function SubjectContent() {
     }
   }
 
-  async function saveTopic(topic: Topic) {
-    const name = editedName.trim();
-    if (!name || name === topic.name) { setEditingTopic(null); return; }
+  const json = { "Content-Type": "application/json" };
+  const failed = (fallback: string) => (e: unknown) => setError(e instanceof Error ? e.message : fallback);
+
+  // Moves and renames apply at once and are then confirmed by a refresh.
+  async function saveTopic(topic: Topic, name: string, groupId: string | null) {
+    setEditingId(null);
+    if (name === topic.name && groupId === topic.groupId) return;
+    setTopics((current) => current.map((item) => item.id === topic.id ? { ...item, name, groupId } : item));
+    revealAndFlash(topic.id, groupId);
+    await api(`/api/topics/${topic.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, groupId }) }).catch(failed("Could not save topic"));
+    await refresh();
+  }
+
+  async function saveGroup(group: Group, name: string, parentId: string | null) {
+    setEditingId(null);
+    if (name === group.name && parentId === group.parentId) return;
+    setGroups((current) => current.map((item) => item.id === group.id ? { ...item, name, parentId } : item));
+    revealAndFlash(group.id, parentId);
+    await api(`/api/groups/${group.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, parentId }) }).catch(failed("Could not save folder"));
+    await refresh();
+  }
+
+  function revealAndFlash(itemId: string, parentId: string | null) {
+    if (parentId) for (const group of groups) if (descendantGroupIds(groups, group.id).has(parentId)) toggleFolder(group.id, true);
+    flash(itemId);
+  }
+
+  function moveItem(item: { kind: "group" | "topic"; id: string }, parentId: string | null) {
+    const group = item.kind === "group" ? groups.find((candidate) => candidate.id === item.id) : undefined;
+    const topic = item.kind === "topic" ? topics.find((candidate) => candidate.id === item.id) : undefined;
+    if (group && group.parentId !== parentId) void saveGroup(group, group.name, parentId);
+    if (topic && topic.groupId !== parentId) void saveTopic(topic, topic.name, parentId);
+  }
+
+  async function addFolder() {
+    const taken = new Set(groups.filter((group) => !group.parentId).map((group) => group.name.toLocaleLowerCase()));
+    let name = "New folder";
+    for (let count = 2; taken.has(name.toLocaleLowerCase()); count++) name = `New folder ${count}`;
     try {
-      await api(`/api/topics/${topic.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
-      setEditingTopic(null);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not rename topic");
-    }
+      const group = await api<Group>(`/api/subjects/${id}/groups`, { method: "POST", headers: json, body: JSON.stringify({ name }) });
+      setGroups((current) => [...current, group]);
+      setEditingId(group.id);
+      flash(group.id);
+    } catch (e) { failed("Could not add folder")(e); }
   }
 
   function removeTopic(topic: Topic) {
     setTopics((current) => current.filter((item) => item.id !== topic.id));
-    if (selectedTopic === topic.id) setSelectedTopic("");
     scheduleUndoDelete(topic.id, {
       message: `Removed ${topic.name}`,
       commit: async () => { await api(`/api/topics/${topic.id}`, { method: "DELETE" }); },
       restore: () => setTopics((current) => current.some((item) => item.id === topic.id) ? current : [...current, topic]),
     });
   }
+
+  // Hiding the folder hides everything inside it; the server deletes its contents when the undo window ends.
+  function removeGroup(group: Group) {
+    const count = tree.find((node) => node.kind === "group" && node.group.id === group.id);
+    const topicCount = count?.kind === "group" ? count.topicCount : 0;
+    setGroups((current) => current.filter((item) => item.id !== group.id));
+    scheduleUndoDelete(group.id, {
+      message: `Removed ${group.name}${topicCount ? ` and ${topicCount} topic${topicCount === 1 ? "" : "s"}` : ""}`,
+      commit: async () => { await api(`/api/groups/${group.id}`, { method: "DELETE" }); },
+      restore: () => setGroups((current) => current.some((item) => item.id === group.id) ? current : [...current, group]),
+    });
+  }
+
+  async function showGroup(group: Group, keepTab = false) {
+    setResourceText(null);
+    setTopicDetail(null);
+    try {
+      const detail = await api<GroupDetail>(`/api/groups/${group.id}`);
+      setGroupDetail(detail);
+      if (!keepTab) setGroupTab("summary");
+      if (detail.summaryStatus !== "complete" && detail.topicCount && aiSettings.configured) void generateGroupSummary(detail.id);
+    } catch (e) { failed("Could not load folder")(e); }
+  }
+
+  async function generateGroupSummary(groupId: string) {
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    if (summarizingGroupIds.includes(groupId)) return;
+    setSummarizingGroupIds((current) => [...current, groupId]);
+    setGroupErrors((current) => ({ ...current, [groupId]: "" }));
+    try {
+      const summary = await api<Pick<GroupDetail, "id" | "summary" | "summaryStatus" | "summaryProvider" | "summaryModel">>(`/api/groups/${groupId}/summary`, { method: "POST", headers: getAiRequestHeaders() });
+      setGroupDetail((current) => current?.id === groupId ? { ...current, ...summary } : current);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not summarize this folder";
+      setGroupErrors((current) => ({ ...current, [groupId]: message }));
+      if (/Codex or Claude/i.test(message)) notifyAiSetupRequired();
+    } finally { setSummarizingGroupIds((current) => current.filter((item) => item !== groupId)); }
+  }
+
+  async function proposeOrganization() {
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    setOrganizing("loading");
+    setPreviewCollapsed(new Set());
+    try {
+      const proposal = await api<{ topics: (Topic & { path: string[] })[] }>(`/api/subjects/${id}/tree`, { method: "POST", headers: getAiRequestHeaders() });
+      setOrganizing(proposal);
+    } catch (e) { setOrganizing(null); failed("Could not organize topics")(e); }
+  }
+
+  async function applyOrganization() {
+    if (!organizing || organizing === "loading") return;
+    const placements = organizing.topics.map(({ id: topicId, path }) => ({ id: topicId, path }));
+    setOrganizing(null);
+    try {
+      await api(`/api/subjects/${id}/tree`, { method: "PUT", headers: json, body: JSON.stringify({ topics: placements }) });
+      setCollapsed(new Set());
+      try { localStorage.removeItem(collapsedKey); } catch { /* Nothing stored. */ }
+    } catch (e) { failed("Could not apply the new folders")(e); }
+    await refresh();
+  }
+
+  const treeActions: TreeActions = {
+    openTopic: (topic) => void showTopic(topic), openGroup: (group) => void showGroup(group),
+    saveTopic: (topic, name, groupId) => void saveTopic(topic, name, groupId), saveGroup: (group, name, parentId) => void saveGroup(group, name, parentId),
+    removeTopic, removeGroup, move: moveItem, editingId, setEditingId,
+  };
 
   async function uploadFiles(fileList: FileList | null) {
     const files = Array.from(fileList ?? []);
@@ -224,6 +334,7 @@ function SubjectContent() {
 
   async function showResourceText(resource: Resource, keepTab = false) {
     setTopicDetail(null);
+    setGroupDetail(null);
     setResourceTextLoading(true);
     setError("");
     setSummaryError("");
@@ -242,6 +353,7 @@ function SubjectContent() {
 
   async function showTopic(topic: Topic, keepTab = false) {
     setResourceText(null);
+    setGroupDetail(null);
     setTopicSummaryError(topic.id, "");
     setSelectedTopicResources([]);
     setResourceSearch("");
@@ -380,28 +492,64 @@ function SubjectContent() {
     }
   }
 
-  async function addSuggestedTopic(name: string) {
+  // Creates the suggested topic in its proposed folder (making folders as needed), or links the existing topic where it is.
+  async function addSuggestedTopic({ name, path }: Placement) {
     const sourceResource = suggestions?.resource;
     if (!sourceResource) return;
     try {
-      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name, path }) });
       await api(`/api/topics/${topic.id}/resources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceId: sourceResource.id }) });
       setResources((current) => current.map((resource) => resource.id === sourceResource.id ? { ...resource, topicIds: [...new Set([...(resource.topicIds ?? []), topic.id])] } : resource));
       setSuggestionQueue((current) => {
         if (!current.length || current[0].resource.id !== sourceResource.id) return current;
-        const remaining = current[0].topics.filter((topic) => topic !== name);
+        const remaining = current[0].topics.filter((topic) => topic.name !== name);
         return remaining.length ? [{ ...current[0], topics: remaining }, ...current.slice(1)] : current.slice(1);
       });
       await refresh();
+      revealAndFlash(topic.id, topic.groupId);
       void generateTopicSummary(topic.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add topic");
     }
   }
 
+  // In an open topic, folder, or resource: Tab cycles its tabs, and Left/Right open the previous or next item.
+  // Up/Down keep scrolling, and keys typed into fields behave normally.
+  useEffect(() => {
+    if (!resourceText && !topicDetail && !groupDetail) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+      if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const step = event.shiftKey ? -1 : 1;
+        if (resourceText) setResourceTab((tab) => cycle(resourceTabs, tab, step));
+        else if (groupDetail) setGroupTab((tab) => cycle(topicTabs, tab, step));
+        else setTopicTab((tab) => cycle(topicTabs, tab, step));
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const step = event.key === "ArrowRight" ? 1 : -1;
+        if (resourceText) {
+          const current = resources.find((item) => item.id === resourceText.id);
+          const next = current && cycle(resources, current, step);
+          if (next && next !== current && !resourceTextLoading) void showResourceText(next, true);
+        } else if (topicDetail) {
+          const current = visibleTopics.find((item) => item.id === topicDetail.id);
+          const next = current && cycle(visibleTopics, current, step);
+          if (next && next !== current) void showTopic(next, true);
+        } else if (groupDetail) {
+          const current = visibleGroups.find((item) => item.id === groupDetail.id);
+          const next = current && cycle(visibleGroups, current, step);
+          if (next && next !== current) void showGroup(next, true);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   const pending = (text: string, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-3 py-6 text-muted"><Spinner />{text}{action}</div>;
   const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
-  const rowTitle = "flex min-w-0 flex-1 items-center gap-3 self-stretch text-left hover:text-accent disabled:cursor-wait";
   const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
 
   return <Page>
@@ -409,20 +557,31 @@ function SubjectContent() {
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
       <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
         <div className="flex items-center gap-2 max-sm:w-full">
-          <Select className="max-w-56 max-sm:max-w-none max-sm:flex-1" aria-label="Topic to practice" value={selectedTopic} onChange={(event) => setSelectedTopic(event.target.value)} disabled={!topics.length}>
-            <option value="">Any topic</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+          <Select className="max-w-56 max-sm:max-w-none max-sm:flex-1" aria-label="Topic or folder to practice" value={practiceValid ? practice : ""} onChange={(event) => setPractice(event.target.value)} disabled={!topics.length}>
+            <option value="">Any topic</option>
+            {tree.map((node) => node.kind === "group"
+              ? <option key={node.group.id} value={`group:${node.group.id}`} disabled={!node.topicCount}>{"\u2003".repeat(node.depth)}{node.group.name} (all {node.topicCount})</option>
+              : <option key={node.topic.id} value={`topic:${node.topic.id}`}>{"\u2003".repeat(node.depth)}{node.topic.name}</option>)}
           </Select>
-          <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => { if (!aiSettings.configured) { notifyAiSetupRequired(); return; } router.push(`/study/${id}${selectedTopic ? `?topic=${encodeURIComponent(selectedTopic)}` : ""}`); }}>Practice</Button>
+          <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => {
+            if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+            const query = practiceTarget.topicId ? `?topic=${practiceTarget.topicId}` : practiceTarget.groupId ? `?group=${practiceTarget.groupId}` : "";
+            router.push(`/study/${id}${practiceValid ? query : ""}`);
+          }}>Practice</Button>
         </div>
       </div>
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       <section className="mb-12">
-        <div className={sectionHead}><h2 className="text-xl font-semibold">Topics</h2><form className="flex items-center gap-2" onSubmit={addTopic}><Input className="w-56 max-sm:w-40" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form></div>
-        {topics.length > 0 && <List>{topics.map((topic) => <ListItem key={topic.id}>
-          {editingTopic === topic.id ? <form className="flex flex-1 items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveTopic(topic); }}><Input className="flex-1" aria-label="Topic name" autoFocus maxLength={160} value={editedName} onChange={(event) => setEditedName(event.target.value)} /><IconButton type="submit" label="Save topic name"><Check size={18} /></IconButton><IconButton label="Cancel editing" onClick={() => setEditingTopic(null)}><X size={18} /></IconButton></form> : <><button type="button" className={rowTitle} onClick={() => void showTopic(topic)} title="View topic summary and linked resources"><BookOpen size={18} className="flex-none text-muted" /><span className="truncate">{topic.name}</span></button><IconButton label={`Edit ${topic.name}`} onClick={() => { setEditingTopic(topic.id); setEditedName(topic.name); }}><Pencil size={18} /></IconButton><IconButton label={`Remove ${topic.name}`} tone="danger" onClick={() => removeTopic(topic)}><Trash2 size={18} /></IconButton></>}
-        </ListItem>)}</List>}
-        {topics.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
+        <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
+          <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
+            {topics.length > 1 && <Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready} title="Have the model propose folders for your topics"><Sparkles size={16} />Organize</Button>}
+            <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
+            <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
+          </div>
+        </div>
+        {tree.length > 0 && <TopicTree groups={groups} topics={topics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId} />}
+        {tree.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
       </section>
 
       <section>
@@ -433,7 +592,18 @@ function SubjectContent() {
     </>}
 
     {suggestions && <Modal title="Suggested topics" subtitle={suggestions.resource.filename} onClose={closeSuggestions}>
-      <List>{suggestions.topics.map((topic) => <ListItem key={topic}><span className="min-w-0 flex-1">{topic}</span><Button size="sm" onClick={() => addSuggestedTopic(topic)}><Plus size={16} />Add</Button></ListItem>)}</List>
+      <List>{suggestions.topics.map((suggestion) => {
+        const existing = topics.find((topic) => topic.name.toLocaleLowerCase() === suggestion.name.toLocaleLowerCase());
+        const path = existing ? groupPath(groups, existing.groupId) : suggestion.path;
+        const newFolders = existing ? 0 : suggestion.path.length - groupPath(groups, matchPath(groups, suggestion.path)).length;
+        return <ListItem key={suggestion.name}>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span>{existing?.name ?? suggestion.name}</span>
+            <span className="text-xs text-muted">{existing ? "Existing topic" : "New topic"} in {path.length ? path.join(" › ") : "the top level"}{newFolders > 0 && ` (${newFolders === 1 ? "new folder" : `${newFolders} new folders`})`}</span>
+          </div>
+          <Button size="sm" onClick={() => addSuggestedTopic(suggestion)}>{existing ? <><Check size={16} />Link</> : <><Plus size={16} />Add</>}</Button>
+        </ListItem>;
+      })}</List>
       <div className="mt-6 flex justify-end"><Button onClick={closeSuggestions}>{suggestionQueue.length > 1 ? "Next resource" : "Done"}</Button></div>
     </Modal>}
 
@@ -456,7 +626,42 @@ function SubjectContent() {
       </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
 
-    {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)}>
+    {groupDetail && <Modal wide title={groupDetail.name} label={`Folder summary for ${groupDetail.name}`} onClose={() => setGroupDetail(null)}
+      subtitle={[...groupPath(groups, groupDetail.parentId), `${groupDetail.topicCount} topic${groupDetail.topicCount === 1 ? "" : "s"}`].join(" › ")}>
+      <Tabs label="Folder content" value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }]} />
+      {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
+      {groupTab === "summary" ? <section role="tabpanel" aria-label="Folder summary">
+        {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
+          {groupDetail.summaryStatus === "stale" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">This folder&apos;s contents changed. Refresh the summary to reflect them.</p>}
+          <MarkdownMathText text={groupDetail.summary} />
+          <div className="mt-6 flex justify-end"><Button variant={groupDetail.summaryStatus === "stale" ? "primary" : "secondary"} onClick={() => void generateGroupSummary(groupDetail.id)}>Refresh</Button></div>
+        </> : <div className="flex flex-col items-start gap-4 py-4">
+          <p className="text-muted">{groupDetail.topicCount ? "A short overview of the topics and folders inside." : "Add topics to this folder to summarize it."}</p>
+          {groupDetail.topicCount > 0 && <Button variant="primary" onClick={() => void generateGroupSummary(groupDetail.id)}>Create summary</Button>}
+        </div>}
+      </section> : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
+        {groupDetail.resources.length ? <List>{groupDetail.resources.map((resource) => <ListItem key={resource.id}>
+          <button type="button" className={rowTitle} onClick={() => { const item = resources.find((candidate) => candidate.id === resource.id); if (item) void showResourceText(item); }}><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button>
+        </ListItem>)}</List> : <p className="text-muted">No resources are linked to topics in this folder.</p>}
+      </section>}
+    </Modal>}
+
+    {organizing && <Modal wide title="Organize topics" onClose={() => setOrganizing(null)}>
+      {organizing === "loading" ? pending("Proposing folders for your topics…") : (() => {
+        const preview = treeFromPaths(organizing.topics);
+        return <>
+          <p className="mb-6 text-muted">Here is a proposed tree. Topics keep their summaries, resources, and review history. Folders left empty are removed.</p>
+          <TopicTree groups={preview.groups} topics={preview.topics} collapsed={previewCollapsed} onToggle={(groupId) => setPreviewCollapsed((current) => {
+            const next = new Set(current);
+            if (!next.delete(groupId)) next.add(groupId);
+            return next;
+          })} />
+          <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setOrganizing(null)}>Cancel</Button><Button variant="primary" onClick={() => void applyOrganization()}>Apply</Button></div>
+        </>;
+      })()}
+    </Modal>}
+
+    {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
       <Tabs label="Topic content" value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
       {topicTab === "summary" ? <section role="tabpanel" aria-label="Topic coverage summary">
@@ -486,6 +691,18 @@ function cycle<T>(items: readonly T[], current: T, step: number) {
 }
 
 const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";
+const rowTitle = "flex min-w-0 flex-1 items-center gap-3 self-stretch text-left hover:text-accent disabled:cursor-wait";
+
+// The deepest existing folder along `path`, matched case-insensitively like the server does.
+function matchPath(groups: Group[], path: string[]) {
+  let parentId: string | null = null;
+  for (const name of path) {
+    const next = groups.find((group) => group.parentId === parentId && group.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (!next) break;
+    parentId = next.id;
+  }
+  return parentId;
+}
 const choiceRow = "flex h-full min-h-12 w-full items-center gap-3 text-left text-sm hover:text-accent";
 
 type LinkSuggestions = string[] | "loading" | "failed";

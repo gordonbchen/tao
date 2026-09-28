@@ -113,6 +113,10 @@
   /* h-control / w-control and their -sm forms: the only control heights. */
   --spacing-control: 40px;
   --spacing-control-sm: 32px;
+
+  /* The only motion beyond color transitions: a moved or new tree row briefly keeps an accent wash. */
+  --animate-flash: flash 1.2s ease-out;
+  @keyframes flash { from { background-color: var(--accent-soft); } }
 }
 
 @layer base {

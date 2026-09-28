@@ -2,18 +2,24 @@ import { generateProblem, type AiOptions } from "@/lib/ai";
 import { LOCAL_OWNER_ID, query } from "@/lib/db";
 import { isNearDuplicatePrompt } from "@/lib/problem-quality";
 import { chooseProblemDifficulty } from "@/lib/scheduler";
+import { subtreeCte } from "@/lib/topic-groups";
 
 export type PracticeTopic = { id: string; name: string; coverageSummary: string };
 type ServedProblem = { id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; createdAt: Date };
+// What the student chose to practice: one topic, every topic in a folder, or any topic when both are omitted.
+export type PracticeSelection = { topicId?: string; groupId?: string };
 type Review = { lastRating: string | null; lastCorrectness: string | null; repetitions: number; dueAt: Date };
 const problemColumns = `p.id, p.topic_id AS "topicId", t.name AS "topicName", p.prompt, p.difficulty, p.source_refs AS "sourceRefs", p.created_at AS "createdAt"`;
 
-// Picks the requested topic, or the most due confirmed topic, preferring one other than `avoidTopicId`.
-export async function pickTopic(subjectId: string, { topicId, avoidTopicId }: { topicId?: string; avoidTopicId?: string } = {}) {
-  const result = topicId
-    ? await query<PracticeTopic>(`SELECT id, name, coverage_summary AS "coverageSummary" FROM topics WHERE id = $1 AND subject_id = $2 AND coverage_confirmed = true`, [topicId, subjectId])
-    : await query<PracticeTopic>(`SELECT t.id, t.name, t.coverage_summary AS "coverageSummary" FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id
-      WHERE t.subject_id = $1 AND t.coverage_confirmed = true ORDER BY t.id = $2, coalesce(r.due_at, now()), t.created_at LIMIT 1`, [subjectId, avoidTopicId ?? null]);
+// Matches problems or topics (`t`) inside the selection; `$1` is the folder ID and `$3` the topic ID.
+const inSelection = `($1::uuid IS NULL OR t.group_id IN (SELECT id FROM subtree)) AND ($3::uuid IS NULL OR t.id = $3)`;
+
+// Picks the requested topic, or the most due confirmed topic in the selection, preferring one other than `avoidTopicId`.
+export async function pickTopic(subjectId: string, { topicId, groupId, avoidTopicId }: PracticeSelection & { avoidTopicId?: string } = {}) {
+  const result = await query<PracticeTopic>(`${subtreeCte} SELECT t.id, t.name, t.coverage_summary AS "coverageSummary"
+    FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id
+    WHERE t.subject_id = $2 AND t.coverage_confirmed = true AND ${inSelection}
+    ORDER BY t.id = $4, coalesce(r.due_at, now()), t.created_at LIMIT 1`, [groupId ?? null, subjectId, topicId ?? null, avoidTopicId ?? null]);
   return result.rows[0] ?? null;
 }
 
@@ -73,32 +79,33 @@ export async function createProblem(subjectId: string, topic: PracticeTopic, aiO
   return { ...result.rows[0], topicName: topic.name } satisfies ServedProblem;
 }
 
-// Serves the subject's waiting problem if it matches the requested topic (any topic when omitted).
-export async function takeReadyProblem(subjectId: string, topicId?: string) {
-  const result = await query<ServedProblem>(`UPDATE problems p SET served_at = now() FROM topics t
-    WHERE p.id = (SELECT r.id FROM problems r JOIN topics rt ON rt.id = r.topic_id AND rt.coverage_confirmed
-      WHERE r.subject_id = $1 AND r.served_at IS NULL AND ($2::uuid IS NULL OR r.topic_id = $2)
+// Serves the subject's waiting problem if it matches the selection.
+export async function takeReadyProblem(subjectId: string, { topicId, groupId }: PracticeSelection = {}) {
+  const result = await query<ServedProblem>(`${subtreeCte} UPDATE problems p SET served_at = now() FROM topics t
+    WHERE p.id = (SELECT r.id FROM problems r JOIN topics t ON t.id = r.topic_id AND t.coverage_confirmed
+      WHERE r.subject_id = $2 AND r.served_at IS NULL AND ${inSelection}
       ORDER BY r.created_at LIMIT 1 FOR UPDATE OF r SKIP LOCKED)
       AND t.id = p.topic_id
-    RETURNING ${problemColumns}`, [subjectId, topicId ?? null]);
+    RETURNING ${problemColumns}`, [groupId ?? null, subjectId, topicId ?? null]);
   return result.rows[0] ?? null;
 }
 
-// Keeps one generated problem waiting for each practice selection (any topic, or one topic) so
+// Keeps one generated problem waiting for each practice selection (any topic, a folder, or one topic) so
 // Practice opens immediately. It is stored, so it carries over between visits instead of being regenerated.
 const preparing: Map<string, Promise<void>> = ((globalThis as { taoReadyProblemPreparations?: Map<string, Promise<void>> }).taoReadyProblemPreparations ??= new Map());
-const preparingKey = (subjectId: string, topicId?: string) => `${subjectId}:${topicId ?? "any"}`;
+const preparingKey = (subjectId: string, { topicId, groupId }: PracticeSelection) => `${subjectId}:${topicId ?? (groupId ? `group:${groupId}` : "any")}`;
 
-export function prepareReadyProblem(subjectId: string, aiOptions: AiOptions, { topicId, avoidTopicId }: { topicId?: string; avoidTopicId?: string } = {}) {
-  const key = preparingKey(subjectId, topicId);
+export function prepareReadyProblem(subjectId: string, aiOptions: AiOptions, selection: PracticeSelection & { avoidTopicId?: string } = {}) {
+  const { topicId, groupId } = selection;
+  const key = preparingKey(subjectId, selection);
   const running = preparing.get(key);
   if (running) return running;
   const work = (async () => {
     await query(`DELETE FROM problems WHERE subject_id = $1 AND served_at IS NULL AND topic_id IS NULL`, [subjectId]);
-    const waiting = await query(`SELECT 1 FROM problems p JOIN topics t ON t.id = p.topic_id AND t.coverage_confirmed
-      WHERE p.subject_id = $1 AND p.served_at IS NULL AND ($2::uuid IS NULL OR p.topic_id = $2) LIMIT 1`, [subjectId, topicId ?? null]);
+    const waiting = await query(`${subtreeCte} SELECT 1 FROM problems p JOIN topics t ON t.id = p.topic_id AND t.coverage_confirmed
+      WHERE p.subject_id = $2 AND p.served_at IS NULL AND ${inSelection} LIMIT 1`, [groupId ?? null, subjectId, topicId ?? null]);
     if (waiting.rowCount) return;
-    const topic = await pickTopic(subjectId, { topicId, avoidTopicId });
+    const topic = await pickTopic(subjectId, selection);
     if (topic) await createProblem(subjectId, topic, aiOptions, { ready: true });
   })().catch((error) => {
     console.error("Could not prepare a practice problem", error instanceof Error ? error.message : error);
@@ -108,11 +115,11 @@ export function prepareReadyProblem(subjectId: string, aiOptions: AiOptions, { t
 }
 
 // Serves a waiting problem, first letting an in-progress preparation for the same selection finish.
-export async function takeOrAwaitReadyProblem(subjectId: string, topicId?: string) {
-  const ready = await takeReadyProblem(subjectId, topicId);
+export async function takeOrAwaitReadyProblem(subjectId: string, selection: PracticeSelection) {
+  const ready = await takeReadyProblem(subjectId, selection);
   if (ready) return ready;
-  const running = preparing.get(preparingKey(subjectId, topicId));
+  const running = preparing.get(preparingKey(subjectId, selection));
   if (!running) return null;
   await running;
-  return takeReadyProblem(subjectId, topicId);
+  return takeReadyProblem(subjectId, selection);
 }
