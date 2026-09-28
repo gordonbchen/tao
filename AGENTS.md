@@ -66,7 +66,7 @@ Do not require an API key to run the site locally. AI actions require a Codex or
 ## Development and code quality
 
 - Prefer no code, then less code. Implement the smallest clear path that satisfies the current behavior. Avoid speculative abstractions, extra services, and duplicate state.
-- Keep a consistent visual style across Tao: use the existing Libertinus typography, paper/ink/accent color tokens, restrained borders, comfortable spacing, and shared button/form patterns. Check nearby screens before adding styles. Keep home and subject pages sparse; remove redundant headings, labels, banners, and controls rather than introducing a new visual language for each feature. Ensure new controls work in dark mode and at narrow widths.
+- Follow the UI style guide below for every visual change. Check nearby screens before adding styles, and ensure new controls work in dark mode and at narrow widths.
 - Keep `compose.yaml` and `compose.portable.yaml` aligned when app services, volumes, or environment variables change. The portable file is the copyable setup path; the host-network file supports this workspace. Verify Compose config after edits and update README setup commands.
 - When an assumption changes, find code that existed because of the old assumption. Remove or simplify it instead of layering a new branch on top.
 - Keep domain decisions (topic scheduling, coverage, difficulty, attempt outcomes) separate from UI and AI-provider calls. Make scheduling deterministic and testable.
@@ -75,6 +75,34 @@ Do not require an API key to run the site locally. AI actions require a Codex or
 - Add meaningful tests for scheduling, authorization, extraction edge cases, and AI response handling. Avoid tests that merely repeat implementation details. Run type checking, linting, and relevant tests before declaring a change complete.
 - Document actual setup and test commands in README.md once tooling exists. Keep an example environment file with variable names and explanations, never live values.
 - For any change, report what changed, how it was checked, and any remaining limitations.
+
+## UI style guide
+
+Tao should look like one calm, well-set printed page, not a collection of widgets. Every screen uses the same small set of sizes, colors, and components. When a value you need is missing, add a token or shared class in `app/globals.css`; do not add a one-off value. When touching a screen, move nearby drift onto the scales below instead of copying it.
+
+**Tokens.** Define every color, size, radius, and control height as a CSS custom property on `:root`, with dark values under `[data-theme="dark"]`. Components reference tokens only; hex values appear nowhere else. Status colors (danger, success, warning) need their own light and dark tokens, like `--danger` and `--danger-soft`, not inline hex.
+
+**Alignment and control height.** Items that sit on one line must share one height and one baseline. This is the most visible defect to avoid.
+- Set height with a height token, not padding: `--control-h: 40px` for buttons, inputs, selects, and segmented controls; `--control-h-sm: 32px` for compact rows, chips, and toolbars. Never mix the two sizes in the same row.
+- Style controls as `display: inline-flex; align-items: center;` with horizontal padding only and `line-height: 1.2`. Icon-only buttons are square (`width = height`).
+- Rows of controls use `display: flex; align-items: center;` and one gap from the spacing scale. Do not nudge alignment with margins, `top`, or `vertical-align`.
+- Text and control on one line (label + select, name + button) must be vertically centered. A multi-line block beside a control aligns to the top.
+
+**Spacing.** Use a 4px scale: 4, 8, 12, 16, 24, 32, 48, 64. Use 8 inside controls and between related controls, 16 between groups, 24–32 between sections, and 48+ between page regions. Do not use odd values (7, 9, 11, 13) or asymmetric padding without a reason written in a comment.
+
+**Type.** Libertinus Serif throughout. The size scale is 14 (captions, metadata), 16 (controls, secondary text), 19 (body), 23 (section headings), 26 (modal and page titles), and `clamp(32px, 5vw, 43px)` for the page title only. Weights are 400 and 600. Body line height is 1.5; headings and controls 1.2. Muted text uses `--muted`, never reduced opacity. Do not use uppercase labels, letter-spacing, or icon-plus-caption stacks as decoration.
+
+**Shape and depth.** Controls, inputs, cards, and panels use a 6px radius; modals 8px; chips, pills, and progress tracks are fully round. Separate content with 1px `--line` borders and whitespace. Shadows are reserved for floating layers (modals, toasts, popovers), and all of them use the same shadow token.
+
+**Color.** Keep color scarce: paper, ink, muted, line, surface, plus one accent. Accent marks the single primary action in a view, the current selection, and links. It is not decoration. There is at most one primary button per view or modal. Destructive actions use the danger token only on hover or in confirmation, since removal already has undo.
+
+**Components.** Reuse the shared patterns before writing new CSS: `.button` / `.button-primary` / `.button-small`, `.modal` with `.modal-head` and `.modal-actions`, `.simple-list` rows, `.content-link-chip`, `.icon-action`, and `.error-message`. Each new visual pattern becomes one shared class used everywhere; screen-specific classes only handle layout. Every interactive element needs hover, `:focus-visible` (the shared outline), and disabled states, and a hit target of at least 32px.
+
+**States and motion.** Loading uses the shared `.spinner` next to text that says what is happening. Empty states are one plain sentence with at most one action. Errors appear next to the thing that failed, in `.error-message`. Transitions are 150ms ease on color and background only. Nothing bounces, slides in, or delays interaction.
+
+**Layout and responsiveness.** Keep a single reading column with a comfortable measure (roughly 60–80 characters for prose). Check every change at 375px wide and in dark mode: rows wrap cleanly, nothing overflows horizontally, and control heights stay equal after wrapping.
+
+**Restraint.** Before adding a heading, border, label, icon, or banner, remove one that is redundant. Prefer fewer, larger, well-spaced elements over many small ones. If two things look almost the same, make them identical.
 
 ## Open decisions
 
