@@ -7,7 +7,7 @@ import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, Plus, Sparkles, Trash
 import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
-import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Select, Spinner, Tabs, Textarea } from "../../ui";
+import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
 import { TopicTree, type Group, type Topic, type TreeActions } from "./topic-tree";
 
 type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: Placement[] };
@@ -48,8 +48,6 @@ function SubjectContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [topicName, setTopicName] = useState("");
-  // Practice selection: "" for any topic, "topic:<id>", or "group:<id>".
-  const [practice, setPractice] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: Placement[] }[]>([]);
@@ -137,19 +135,22 @@ function SubjectContent() {
   const tree = flattenTree(buildTree(groups, topics));
   const visibleTopics = tree.flatMap((node) => node.kind === "topic" ? [node.topic] : []);
   const visibleGroups = tree.flatMap((node) => node.kind === "group" ? [node.group] : []);
-  const practiceTarget = practice.startsWith("topic:") ? { topicId: practice.slice(6) } : practice.startsWith("group:") ? { groupId: practice.slice(6) } : {};
-  const practiceValid = !practice || tree.some((node) => practice === (node.kind === "topic" ? `topic:${node.topic.id}` : `group:${node.group.id}`));
-  useEffect(() => { if (!practiceValid) setPractice(""); }, [practiceValid]);
-
-  // Have one practice problem generated and waiting so Practice opens without a delay.
+  // Have one any-topic practice problem generated and waiting so Practice opens without a delay.
+  // Topic and folder practice (from the tree's menu) prepare their next problem once started.
   const hasTopics = topics.length > 0;
   useEffect(() => {
     if (!aiSettings.configured || !hasTopics) return;
-    const [kind, targetId] = practice.split(":");
     void fetch(`/api/subjects/${id}/problems/ready`, {
-      method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(targetId ? { [`${kind}Id`]: targetId } : {}),
+      method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: "{}",
     }).catch(() => {});
-  }, [id, aiSettings.configured, hasTopics, practice]);
+  }, [id, aiSettings.configured, hasTopics]);
+
+  function startPractice(target: { topicId?: string; groupId?: string } = {}) {
+    if (!aiSettings.ready) return;
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    const query = target.topicId ? `?topic=${target.topicId}` : target.groupId ? `?group=${target.groupId}` : "";
+    router.push(`/study/${id}${query}`);
+  }
 
   async function addTopic(event: React.FormEvent) {
     event.preventDefault();
@@ -309,7 +310,7 @@ function SubjectContent() {
   const treeActions: TreeActions = {
     openTopic: (topic) => void showTopic(topic), openGroup: (group) => void showGroup(group),
     saveTopic: (topic, name, groupId) => void saveTopic(topic, name, groupId), saveGroup: (group, name, parentId) => void saveGroup(group, name, parentId),
-    removeTopic, removeGroup, addFolder: (parentId) => void addFolder(parentId), addTopic: (groupId) => void addTopicIn(groupId), move: moveItem, editingId, renameOnly, setEditingId: startEditing,
+    removeTopic, removeGroup, practice: startPractice, addFolder: (parentId) => void addFolder(parentId), addTopic: (groupId) => void addTopicIn(groupId), move: moveItem, editingId, renameOnly, setEditingId: startEditing,
   };
 
   async function uploadFiles(fileList: FileList | null) {
@@ -581,19 +582,7 @@ function SubjectContent() {
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
       <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
-        <div className="flex items-center gap-2 max-sm:w-full">
-          <Select className="max-w-56 max-sm:max-w-none max-sm:flex-1" aria-label="Topic or folder to practice" value={practiceValid ? practice : ""} onChange={(event) => setPractice(event.target.value)} disabled={!topics.length}>
-            <option value="">Any topic</option>
-            {tree.map((node) => node.kind === "group"
-              ? <option key={node.group.id} value={`group:${node.group.id}`} disabled={!node.topicCount}>{"\u2003".repeat(node.depth)}{node.group.name} (all {node.topicCount})</option>
-              : <option key={node.topic.id} value={`topic:${node.topic.id}`}>{"\u2003".repeat(node.depth)}{node.topic.name}</option>)}
-          </Select>
-          <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => {
-            if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
-            const query = practiceTarget.topicId ? `?topic=${practiceTarget.topicId}` : practiceTarget.groupId ? `?group=${practiceTarget.groupId}` : "";
-            router.push(`/study/${id}${practiceValid ? query : ""}`);
-          }}>Practice</Button>
-        </div>
+        <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice the most due topic. Right-click a topic or folder to practice just that.">Practice</Button>
       </div>
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
