@@ -25,8 +25,10 @@ export type TreeActions = {
 };
 
 type DropMode = "before" | "after" | "inside";
-// A row that accepts drops. `id` is null for the top-level zone shown while dragging.
-type DropRow = { key: string; id: string | null; parentId: string | null; folder?: { open: boolean } };
+// A row that accepts drops. `id` is null for the top-level zone shown while dragging. `exit` is the folder a row
+// is the last visible row of: dropping below that row places the item after the folder instead of inside it.
+type Place = { id: string; parentId: string | null; depth: number };
+type DropRow = { key: string; id: string | null; parentId: string | null; depth: number; folder?: { open: boolean }; exit?: Place; onlyInside?: boolean };
 
 type TopicTreeProps = {
   groups: Group[];
@@ -49,7 +51,7 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
   const nodes = buildTree(groups, topics);
   const folders = flattenTree(nodes).filter((node) => node.kind === "group");
   const [dragged, setDragged] = useState<TreeItem | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ key: string; mode: DropMode } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ key: string; mode: DropMode; lineDepth: number } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
 
   const menuProps = (label: string, items: MenuItem[]) => actions ? {
@@ -64,30 +66,32 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
 
   const canDrop = (parentId: string | null) =>
     Boolean(dragged && (dragged.kind === "topic" || !parentId || !descendantGroupIds(groups, dragged.id).has(parentId)));
-  // Top quarter of a folder row (half of a topic row) is before it, bottom is after; the rest of a folder is inside.
-  // An open folder has no "after" band, since its children follow it directly.
+  // A topic row's top half is before it and its bottom half after it. A folder row splits into thirds: before,
+  // inside, after; an open folder's bottom third is also inside, since its children follow it directly.
   const dropMode = (event: DragEvent, row: DropRow): DropMode => {
-    if (!row.id) return "inside";
+    if (!row.id || row.onlyInside) return "inside";
     const rect = event.currentTarget.getBoundingClientRect();
     const offset = (event.clientY - rect.top) / rect.height;
     if (!row.folder) return offset < 0.5 ? "before" : "after";
-    return offset < 0.25 ? "before" : offset > 0.75 && !row.folder.open ? "after" : "inside";
+    return offset < 1 / 3 ? "before" : offset > 2 / 3 && !row.folder.open ? "after" : "inside";
   };
   const placement = (row: DropRow, mode: DropMode) => {
-    if (!dragged || row.id === dragged.id) return null;
-    const parentId = mode === "inside" ? row.id : row.parentId;
+    const target: Place | null = mode === "after" && row.exit ? row.exit : row.id ? { id: row.id, parentId: row.parentId, depth: row.depth } : null;
+    if (!dragged || target?.id === dragged.id) return null;
+    const parentId = mode === "inside" ? target?.id ?? null : target!.parentId;
     if (!canDrop(parentId)) return null;
     const siblings = siblingPositions(groups, topics, parentId, dragged.id);
-    const index = mode === "inside" ? siblings.length : siblings.findIndex((sibling) => sibling.id === row.id) + (mode === "after" ? 1 : 0);
-    return { parentId, position: positionAt(siblings.map((sibling) => sibling.position), index) };
+    const index = mode === "inside" ? siblings.length : siblings.findIndex((sibling) => sibling.id === target!.id) + (mode === "after" ? 1 : 0);
+    return { parentId, position: positionAt(siblings.map((sibling) => sibling.position), index), lineDepth: target?.depth ?? 0 };
   };
   const dropProps = (row: DropRow) => actions ? {
     onDragOver: (event: DragEvent) => {
       const mode = dropMode(event, row);
-      if (!placement(row, mode)) return;
+      const place = placement(row, mode);
+      if (!place) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      if (dropTarget?.key !== row.key || dropTarget.mode !== mode) setDropTarget({ key: row.key, mode });
+      if (dropTarget?.key !== row.key || dropTarget.mode !== mode || dropTarget.lineDepth !== place.lineDepth) setDropTarget({ key: row.key, mode, lineDepth: place.lineDepth });
     },
     onDragLeave: (event: DragEvent) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget((current) => current?.key === row.key ? null : current);
@@ -99,9 +103,10 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
       if (dragged && place) actions.move(dragged, place.parentId, place.position);
     },
   } : {};
-  // Inside is a tinted row; before and after draw an accent line on that edge.
+  // Inside is a tinted row; before and after draw an accent line on that edge, indented to the level the item lands at.
   const dropClass = (key: string) => dropTarget?.key !== key ? undefined : dropTarget.mode === "inside" ? "bg-accent-soft"
-    : cn("relative before:absolute before:inset-x-0 before:h-0.5 before:bg-accent", dropTarget.mode === "before" ? "before:-top-px" : "before:-bottom-px");
+    : cn("relative before:absolute before:right-0 before:left-(--drop-indent) before:h-0.5 before:bg-accent", dropTarget.mode === "before" ? "before:-top-px" : "before:-bottom-px");
+  const rowStyle = (key: string, depth: number) => ({ ...indent(depth), ...(dropTarget?.key === key && { "--drop-indent": `${dropTarget.lineDepth * 24}px` }) });
   const dragProps = (item: TreeItem) => actions && actions.editingId !== item.id ? {
     draggable: true,
     onDragStart: (event: DragEvent) => {
@@ -119,13 +124,13 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
       folders={folders.filter((folder) => !excluded.has(folder.group.id)).map((folder) => ({ id: folder.group.id, name: folder.group.name, depth: folder.depth }))} />;
   };
 
-  const render = (node: TreeNode<Group, Topic>, depth: number): ReactNode => {
+  const render = (node: TreeNode<Group, Topic>, depth: number, exit?: Place): ReactNode => {
     if (node.kind === "topic") {
       const { topic } = node;
       const key = `topic:${topic.id}`;
       return <li key={key}>
-        <div className={cn(row, dropClass(key), highlightId === topic.id && "animate-flash")} style={indent(depth)}
-          {...dragProps({ kind: "topic", id: topic.id })} {...dropProps({ key, id: topic.id, parentId: topic.groupId })} {...menuProps(topic.name, actions ? [
+        <div className={cn(row, dropClass(key), highlightId === topic.id && "animate-flash")} style={rowStyle(key, depth)}
+          {...dragProps({ kind: "topic", id: topic.id })} {...dropProps({ key, id: topic.id, parentId: topic.groupId, depth, exit })} {...menuProps(topic.name, actions ? [
             { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(topic.id) },
             { label: "New folder here", icon: <FolderPlus size={16} />, disabled: depth >= MAX_DEPTH, onSelect: () => actions.addFolder(topic.groupId) },
             { label: "Delete", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeTopic(topic) },
@@ -144,8 +149,8 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
     const open = !collapsed.has(group.id);
     const FolderIcon = open ? FolderOpen : Folder;
     return <li key={key}>
-      <div className={cn(row, dropClass(key), highlightId === group.id && "animate-flash")} style={indent(depth)}
-        {...dragProps({ kind: "group", id: group.id })} {...dropProps({ key, id: group.id, parentId: group.parentId, folder: { open } })} {...menuProps(group.name, actions ? [
+      <div className={cn(row, dropClass(key), highlightId === group.id && "animate-flash")} style={rowStyle(key, depth)}
+        {...dragProps({ kind: "group", id: group.id })} {...dropProps({ key, id: group.id, parentId: group.parentId, depth, folder: { open }, exit: open ? undefined : exit })} {...menuProps(group.name, actions ? [
           { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(group.id) },
           { label: "New topic inside", icon: <BookPlus size={16} />, onSelect: () => actions.addTopic(group.id) },
           { label: "New folder inside", icon: <FolderPlus size={16} />, disabled: depth + 1 >= MAX_DEPTH, onSelect: () => actions.addFolder(group.id) },
@@ -164,8 +169,10 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
       {/* Animating grid rows from 0fr to 1fr collapses the folder to its content height without measuring it. */}
       <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")} inert={!open}>
         <ul className="min-h-0 overflow-hidden">
-          {children.map((child) => render(child, depth + 1))}
-          {!children.length && actions && <li className="flex min-h-12 items-center border-b border-line py-2 text-sm text-muted" style={indent(depth + 1)}>
+          {/* The last row inside this folder exits to after it, or after an outer folder when this folder is last too. */}
+          {children.map((child, index) => render(child, depth + 1, index === children.length - 1 ? exit ?? { id: group.id, parentId: group.parentId, depth } : undefined))}
+          {!children.length && actions && <li className={cn("flex min-h-12 items-center border-b border-line py-2 text-sm text-muted", dropClass(`empty:${group.id}`))} style={indent(depth + 1)}
+            {...dropProps({ key: `empty:${group.id}`, id: group.id, parentId: group.parentId, depth, onlyInside: true })}>
             <span className="size-control-sm flex-none" /><span className="pl-2">Empty. Drag topics here.</span>
           </li>}
         </ul>
@@ -175,7 +182,7 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
 
   return <>
     <ul className="border-t border-line">{nodes.map((node) => render(node, 0))}</ul>
-    {dragged && groups.length > 0 && <div {...dropProps({ key: "root", id: null, parentId: null })} className={cn("mt-2 flex h-control items-center justify-center rounded-md border border-line text-sm text-muted transition-colors",
+    {dragged && groups.length > 0 && <div {...dropProps({ key: "root", id: null, parentId: null, depth: 0 })} className={cn("mt-2 flex h-control items-center justify-center rounded-md border border-line text-sm text-muted transition-colors",
       dropTarget?.key === "root" && "border-accent bg-accent-soft text-accent")}>Move to the end of the top level</div>}
     {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
   </>;
