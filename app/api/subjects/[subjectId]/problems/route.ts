@@ -24,11 +24,13 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
   if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before practicing", 409);
-  let body: { topicId?: string; skipReuse?: boolean };
+  let body: { topicId?: string; groupId?: string; skipReuse?: boolean };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   if (body.topicId !== undefined && (typeof body.topicId !== "string" || !isUuid(body.topicId))) return jsonError("Topic not found", 404);
+  if (body.groupId !== undefined && (typeof body.groupId !== "string" || !isUuid(body.groupId))) return jsonError("Folder not found", 404);
   if (body.skipReuse !== undefined && typeof body.skipReuse !== "boolean") return jsonError("skipReuse must be a boolean");
-  const topic = await pickTopic(subjectId, { topicId: body.topicId });
+  const selection = body.topicId ? { topicId: body.topicId } : body.groupId ? { groupId: body.groupId } : {};
+  const topic = await pickTopic(subjectId, selection);
   if (!topic) return jsonError("Add and confirm at least one covered topic before generating practice", 409);
   const lastAttemptResult = await query<{ id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; createdAt: Date; lastAttemptAt: Date; rating: string; correctness: string }>(
     `SELECT p.id, p.topic_id AS "topicId", t.name AS "topicName", p.prompt, p.difficulty,
@@ -50,9 +52,9 @@ export async function POST(request: Request, { params }: RouteContext) {
     } });
   }
   try {
-    const problem = await takeOrAwaitReadyProblem(subjectId, body.topicId) ?? await createProblem(subjectId, topic, aiOptions);
-    // Prepare the next problem for the same selection while the student works on this one; with any topic, prefer a different one.
-    after(() => prepareReadyProblem(subjectId, aiOptions, body.topicId ? { topicId: body.topicId } : { avoidTopicId: problem.topicId }));
+    const problem = await takeOrAwaitReadyProblem(subjectId, selection) ?? await createProblem(subjectId, topic, aiOptions);
+    // Prepare the next problem for the same selection while the student works on this one; across topics, prefer a different one.
+    after(() => prepareReadyProblem(subjectId, aiOptions, body.topicId ? selection : { ...selection, avoidTopicId: problem.topicId }));
     return Response.json({ problem }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error && error.message.startsWith("The tutor repeated") ? error.message : "The tutor could not generate a problem. Check the configured AI provider or try again.";

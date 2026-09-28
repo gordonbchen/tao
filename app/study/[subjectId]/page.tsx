@@ -31,7 +31,8 @@ function StudyContent() {
   const ai = useAISettings();
   const [subject, setSubject] = useState<Subject | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
-  const [topicId, setTopicId] = useState("");
+  // One topic, a folder, or neither for any topic.
+  const [selection, setSelection] = useState<{ topicId?: string; groupId?: string }>({});
   const [problem, setProblem] = useState<Problem | null>(null);
   const [answer, setAnswer] = useState("");
   const [rating, setRating] = useState("okay");
@@ -67,7 +68,7 @@ function StudyContent() {
     return headers;
   }, [ai.requestHeaders]);
 
-  const generate = useCallback(async (requestedTopic = topicId, skipReuse = false) => {
+  const generate = useCallback(async (requested = selection, skipReuse = false) => {
     if (!ai.ready) return;
     if (!ai.configured) {
       setGenerating(false);
@@ -77,17 +78,19 @@ function StudyContent() {
     }
     setWorking(true); setGenerating(true); setError("");
     try {
-      const result = await api<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ ...(requestedTopic ? { topicId: requestedTopic } : {}), ...(skipReuse ? { skipReuse: true } : {}) }) });
+      const result = await api<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ ...requested, ...(skipReuse ? { skipReuse: true } : {}) }) });
       setProblem(result.problem); setFeedback(null); setShowSolution(false); setAnswer(""); setRating("okay"); setChatText(""); setMessages([]);
       setShowProblemFeedback(false); setProblemFeedbackTags([]); setProblemFeedbackNote(""); setProblemFeedbackSaved(false);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create a problem"); }
     finally { setWorking(false); setGenerating(false); }
-  }, [ai.configured, ai.ready, aiHeaders, subjectId, topicId]);
+  }, [ai.configured, ai.ready, aiHeaders, subjectId, selection]);
 
   // Load subject data independently so provider setup can finish before generation.
   useEffect(() => {
-    const requestedTopic = new URLSearchParams(window.location.search).get("topic") ?? "";
-    setTopicId(requestedTopic);
+    const search = new URLSearchParams(window.location.search);
+    const topicId = search.get("topic");
+    const groupId = search.get("group");
+    setSelection(topicId ? { topicId } : groupId ? { groupId } : {});
     api<{ subject: Subject; topics: Topic[] }>(`/api/subjects/${subjectId}`).then(data => {
       setSubject(data.subject);
       document.title = `Tao - ${data.subject.name}`;
@@ -106,8 +109,8 @@ function StudyContent() {
       return;
     }
     autoStarted.current = true;
-    void generate(topicId);
-  }, [ai.configured, ai.ready, generate, loading, subjectLoaded, topicId, topics.length]);
+    void generate(selection);
+  }, [ai.configured, ai.ready, generate, loading, subjectLoaded, selection, topics.length]);
 
   async function askTutor(e?: React.FormEvent, suggested?: string) {
     e?.preventDefault(); const content = (suggested ?? chatText).trim(); if (!content || !problem || chatBusy) return;
@@ -142,7 +145,7 @@ function StudyContent() {
       });
       setShowProblemFeedback(false);
       setProblemFeedbackSaved(result.saved);
-      if (feedbackMode === "skip") await generate(topicId, true);
+      if (feedbackMode === "skip") await generate(selection, true);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save problem feedback"); }
     finally { setSavingProblemFeedback(false); }
   }
