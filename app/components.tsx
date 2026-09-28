@@ -155,7 +155,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Select className="min-w-0 max-w-64 max-sm:max-w-32" aria-label="AI model" title={`Select ${provider} model`} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.provider} · {option.id}</option>)}</Select>
           <div className="flex min-w-0 items-center gap-2 px-2 text-xs text-muted" title={usageLabel} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
             <span className="max-md:hidden">Usage remaining</span>
-            <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-subtle"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
+            <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-line-strong"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
             <strong className="font-semibold text-ink">{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
           </div>
           <IconButton label="AI accounts" onClick={() => setAccountsOpen(true)}><KeyRound size={20} /></IconButton>

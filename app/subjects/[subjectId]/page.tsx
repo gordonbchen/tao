@@ -99,6 +99,45 @@ function SubjectContent() {
     };
   }, [refresh]);
 
+  // In an open topic or resource: Tab cycles its tabs, and Left/Right open the previous or next item.
+  // Up/Down keep scrolling, and keys typed into fields behave normally.
+  useEffect(() => {
+    if (!resourceText && !topicDetail) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+      if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const step = event.shiftKey ? -1 : 1;
+        if (resourceText) setResourceTab((tab) => cycle(resourceTabs, tab, step));
+        else setTopicTab((tab) => cycle(topicTabs, tab, step));
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const step = event.key === "ArrowRight" ? 1 : -1;
+        if (resourceText) {
+          const current = resources.find((item) => item.id === resourceText.id);
+          const next = current && cycle(resources, current, step);
+          if (next && next !== current && !resourceTextLoading) void showResourceText(next, true);
+        } else if (topicDetail) {
+          const current = topics.find((item) => item.id === topicDetail.id);
+          const next = current && cycle(topics, current, step);
+          if (next && next !== current) void showTopic(next, true);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  // Have one practice problem generated and waiting so Practice opens without a delay.
+  const hasTopics = topics.length > 0;
+  useEffect(() => {
+    if (!aiSettings.configured || !hasTopics) return;
+    void fetch(`/api/subjects/${id}/problems/ready`, {
+      method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(selectedTopic ? { topicId: selectedTopic } : {}),
+    }).catch(() => {});
+  }, [id, aiSettings.configured, hasTopics, selectedTopic]);
+
   async function addTopic(event: React.FormEvent) {
     event.preventDefault();
     const name = topicName.trim();
@@ -183,7 +222,7 @@ function SubjectContent() {
     });
   }
 
-  async function showResourceText(resource: Resource) {
+  async function showResourceText(resource: Resource, keepTab = false) {
     setTopicDetail(null);
     setResourceTextLoading(true);
     setError("");
@@ -194,14 +233,14 @@ function SubjectContent() {
       setSelectedResourceTopics(detail.topics.map((topic) => topic.id));
       setTopicSearch("");
       setResourceTopicsError("");
-      setResourceTab("summary");
+      if (!keepTab) setResourceTab("summary");
       if (detail.summaryStatus === "not_generated" || detail.summaryStatus === "failed") void generateResourceSummary(resource.id);
     }
     catch (e) { setError(e instanceof Error ? e.message : "Could not load extracted text"); }
     finally { setResourceTextLoading(false); }
   }
 
-  async function showTopic(topic: Topic) {
+  async function showTopic(topic: Topic, keepTab = false) {
     setResourceText(null);
     setTopicSummaryError(topic.id, "");
     setSelectedTopicResources([]);
@@ -211,7 +250,7 @@ function SubjectContent() {
       const detail = await api<TopicDetail>(`/api/topics/${topic.id}`);
       setTopicDetail(detail);
       setSelectedTopicResources(detail.resources.map((resource) => resource.id));
-      setTopicTab("summary");
+      if (!keepTab) setTopicTab("summary");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load topic"); }
   }
 
@@ -360,7 +399,6 @@ function SubjectContent() {
     }
   }
 
-  const caption = (label: string, provider?: string | null, model?: string | null) => <p className="mb-3 text-xs text-muted">{label}{provider ? ` · ${provider}${model ? ` · ${model}` : ""}` : ""}</p>;
   const pending = (text: string, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-3 py-6 text-muted"><Spinner />{text}{action}</div>;
   const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
   const rowTitle = "flex min-w-0 flex-1 items-center gap-3 self-stretch text-left hover:text-accent disabled:cursor-wait";
@@ -404,7 +442,6 @@ function SubjectContent() {
       {resourceTab === "summary" ? <section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
-          {caption("Model summary", resourceText.summaryProvider, resourceText.summaryModel)}
           <MarkdownMathText text={resourceText.modelSummary} />
         </> : <div className="flex flex-col items-start gap-4 py-4">
           <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
@@ -437,6 +474,15 @@ function SubjectContent() {
       </section>}
     </Modal>}
   </Page>;
+}
+
+const resourceTabs = ["summary", "topics", "extracted"] as const;
+const topicTabs = ["summary", "resources"] as const;
+
+// Returns the item `step` places from `current`, wrapping around; `current` itself if it is not in the list.
+function cycle<T>(items: readonly T[], current: T, step: number) {
+  const index = items.indexOf(current);
+  return index < 0 ? current : items[(index + step + items.length) % items.length];
 }
 
 const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";

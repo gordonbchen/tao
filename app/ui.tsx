@@ -99,19 +99,11 @@ export function Modal({ title, label, subtitle, onClose, wide, children }: Modal
 
 type Tab<T extends string> = { id: T; label: string; count?: number };
 
-// Underlined tab list with arrow-key navigation.
+// Underlined tab list. Pages that use it own its keyboard shortcuts.
 export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string }) {
-  function move(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
-    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
-    const next = (index + step + tabs.length) % tabs.length;
-    onChange(tabs[next].id);
-    (event.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
-  }
   return <div role="tablist" aria-label={label} className="-mt-2 mb-4 flex gap-6 border-b border-line">
-    {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
-      onClick={() => onChange(tab.id)} onKeyDown={event => move(event, index)}
+    {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
+      onClick={() => onChange(tab.id)}
       className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
       {tab.label}{tab.count !== undefined && <span className="text-xs text-muted">{tab.count.toLocaleString()}</span>}
     </button>)}
