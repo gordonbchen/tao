@@ -15,7 +15,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   try {
     const result = await query(`INSERT INTO topic_groups(subject_id, parent_id, name)
       SELECT $1, $2::uuid, $3 WHERE $2::uuid IS NULL OR EXISTS (SELECT 1 FROM topic_groups WHERE id = $2 AND subject_id = $1)
-      RETURNING id, name, parent_id AS "parentId"`, [subjectId, body.parentId ?? null, name]);
+      RETURNING id, name, parent_id AS "parentId", position`, [subjectId, body.parentId ?? null, name]);
     return result.rows[0] ? Response.json(result.rows[0], { status: 201 }) : jsonError("Folder not found", 404);
   } catch (error) {
     if ((error as { code?: string }).code === "23505") return jsonError("A folder with that name is already here", 409);

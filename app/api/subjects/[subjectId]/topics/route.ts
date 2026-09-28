@@ -7,10 +7,10 @@ type RouteContext = { params: Promise<{ subjectId: string }> };
 export async function GET(_request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
-  const result = await query(`SELECT t.id, t.name, t.group_id AS "groupId", t.coverage_confirmed AS "coverageConfirmed",
+  const result = await query(`SELECT t.id, t.name, t.group_id AS "groupId", t.position, t.coverage_confirmed AS "coverageConfirmed",
     json_build_object('dueAt', r.due_at, 'intervalDays', r.interval_days, 'repetitions', r.repetitions,
       'lastRating', r.last_rating, 'lastCorrectness', r.last_correctness) AS review
-    FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id WHERE t.subject_id = $1 ORDER BY t.created_at`, [subjectId]);
+    FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id WHERE t.subject_id = $1 ORDER BY t.position, t.created_at`, [subjectId]);
   return Response.json(result.rows);
 }
 
@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       for (const name of [...new Set(names)]) {
         const result = await client.query(`INSERT INTO topics(subject_id, name, coverage_confirmed, group_id) VALUES ($1, $2, $3, $4)
           ON CONFLICT(subject_id, name) DO UPDATE SET name = excluded.name
-          RETURNING id, name, group_id AS "groupId", coverage_confirmed AS "coverageConfirmed"`, [subjectId, name, body.coverageConfirmed ?? true, groupId]);
+          RETURNING id, name, group_id AS "groupId", position, coverage_confirmed AS "coverageConfirmed"`, [subjectId, name, body.coverageConfirmed ?? true, groupId]);
         await client.query("INSERT INTO topic_reviews(topic_id) VALUES ($1) ON CONFLICT(topic_id) DO NOTHING", [result.rows[0].id]);
         rows.push({ ...result.rows[0], review: { dueAt: new Date().toISOString(), intervalDays: 0, repetitions: 0, lastRating: null, lastCorrectness: null } });
       }

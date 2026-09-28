@@ -1,8 +1,9 @@
 // Pure helpers for a subject's folder tree. Folders (groups) nest; topics are always leaves.
 // Used by both the server and the subject page, so keep this free of server imports.
 
-export type TreeGroup = { id: string; name: string; parentId: string | null };
-export type TreeTopic = { id: string; name: string; groupId: string | null };
+// `position` orders siblings of both kinds together; items without one keep their input order, folders first.
+export type TreeGroup = { id: string; name: string; parentId: string | null; position?: number };
+export type TreeTopic = { id: string; name: string; groupId: string | null; position?: number };
 export type TreeNode<G extends TreeGroup = TreeGroup, T extends TreeTopic = TreeTopic> =
   | { kind: "group"; group: G; children: TreeNode<G, T>[]; topicCount: number }
   | { kind: "topic"; topic: T };
@@ -11,18 +12,34 @@ export type Placement = { name: string; path: string[] };
 
 export const MAX_DEPTH = 4;
 
-// Builds the nested tree, folders before topics, keeping the input order within each.
+// Builds the nested tree with siblings sorted by position (a stable sort, so ties keep folders first).
 // Items whose folder is missing (for example, pending removal) are left out.
 export function buildTree<G extends TreeGroup, T extends TreeTopic>(groups: G[], topics: T[]): TreeNode<G, T>[] {
-  const build = (parentId: string | null, seen: Set<string>): TreeNode<G, T>[] => [
+  const build = (parentId: string | null, seen: Set<string>): TreeNode<G, T>[] => ([
     ...groups.filter((group) => group.parentId === parentId && !seen.has(group.id)).map((group) => {
       const children = build(group.id, new Set([...seen, group.id]));
       const topicCount = children.reduce((total, child) => total + (child.kind === "topic" ? 1 : child.topicCount), 0);
       return { kind: "group" as const, group, children, topicCount };
     }),
     ...topics.filter((topic) => topic.groupId === parentId).map((topic) => ({ kind: "topic" as const, topic })),
-  ];
+  ] as TreeNode<G, T>[]).sort((a, b) => nodePosition(a) - nodePosition(b));
   return build(null, new Set());
+}
+
+const nodePosition = (node: TreeNode) => (node.kind === "group" ? node.group.position : node.topic.position) ?? 0;
+
+// The positions of a folder's children (or the top level's), in order, leaving out `excludeId`.
+export function siblingPositions(groups: TreeGroup[], topics: TreeTopic[], parentId: string | null, excludeId?: string) {
+  return [...groups.filter((group) => group.parentId === parentId), ...topics.filter((topic) => topic.groupId === parentId)]
+    .filter((item) => item.id !== excludeId).map((item) => ({ id: item.id, position: item.position ?? 0 })).sort((a, b) => a.position - b.position);
+}
+
+// A position that sorts at `index` among sorted sibling positions: between two neighbors, or one past either end.
+export function positionAt(positions: number[], index: number) {
+  if (!positions.length) return 0;
+  if (index <= 0) return positions[0] - 1;
+  if (index >= positions.length) return positions[positions.length - 1] + 1;
+  return (positions[index - 1] + positions[index]) / 2;
 }
 
 // Every folder and topic in the order the tree shows them, with nesting depth (0 at the top level).

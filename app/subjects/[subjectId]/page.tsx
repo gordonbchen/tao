@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
-import { buildTree, descendantGroupIds, flattenTree, groupPath, treeFromPaths, type Placement } from "@/lib/topic-tree";
+import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Select, Spinner, Tabs, Textarea } from "../../ui";
@@ -38,6 +38,9 @@ function SubjectContent() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
+  // A just-created topic or folder already sits where it was made, so its edit row only renames it.
+  const [renameOnly, setRenameOnly] = useState(false);
+  const startEditing = (itemId: string | null, onlyRename = false) => { setEditingId(itemId); setRenameOnly(onlyRename); };
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [organizing, setOrganizing] = useState<{ topics: (Topic & { path: string[] })[] } | "loading" | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState<Set<string>>(new Set());
@@ -170,22 +173,29 @@ function SubjectContent() {
   const failed = (fallback: string) => (e: unknown) => setError(e instanceof Error ? e.message : fallback);
 
   // Moves and renames apply at once and are then confirmed by a refresh.
-  async function saveTopic(topic: Topic, name: string, groupId: string | null) {
+  // Without a position, an item moved to another folder goes last in it.
+  async function saveTopic(topic: Topic, name: string, groupId: string | null, position = endPosition(topic, groupId)) {
     setEditingId(null);
-    if (name === topic.name && groupId === topic.groupId) return;
-    setTopics((current) => current.map((item) => item.id === topic.id ? { ...item, name, groupId } : item));
+    if (name === topic.name && groupId === topic.groupId && position === topic.position) return;
+    setTopics((current) => current.map((item) => item.id === topic.id ? { ...item, name, groupId, position } : item));
     revealAndFlash(topic.id, groupId);
-    await api(`/api/topics/${topic.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, groupId }) }).catch(failed("Could not save topic"));
+    await api(`/api/topics/${topic.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, groupId, position }) }).catch(failed("Could not save topic"));
     await refresh();
   }
 
-  async function saveGroup(group: Group, name: string, parentId: string | null) {
+  async function saveGroup(group: Group, name: string, parentId: string | null, position = endPosition(group, parentId)) {
     setEditingId(null);
-    if (name === group.name && parentId === group.parentId) return;
-    setGroups((current) => current.map((item) => item.id === group.id ? { ...item, name, parentId } : item));
+    if (name === group.name && parentId === group.parentId && position === group.position) return;
+    setGroups((current) => current.map((item) => item.id === group.id ? { ...item, name, parentId, position } : item));
     revealAndFlash(group.id, parentId);
-    await api(`/api/groups/${group.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, parentId }) }).catch(failed("Could not save folder"));
+    await api(`/api/groups/${group.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, parentId, position }) }).catch(failed("Could not save folder"));
     await refresh();
+  }
+
+  function endPosition(item: Group | Topic, parentId: string | null) {
+    if (parentId === ("parentId" in item ? item.parentId : item.groupId)) return item.position;
+    const siblings = siblingPositions(groups, topics, parentId, item.id);
+    return positionAt(siblings.map((sibling) => sibling.position), siblings.length);
   }
 
   function revealAndFlash(itemId: string, parentId: string | null) {
@@ -193,22 +203,37 @@ function SubjectContent() {
     flash(itemId);
   }
 
-  function moveItem(item: { kind: "group" | "topic"; id: string }, parentId: string | null) {
+  function moveItem(item: { kind: "group" | "topic"; id: string }, parentId: string | null, position: number) {
     const group = item.kind === "group" ? groups.find((candidate) => candidate.id === item.id) : undefined;
     const topic = item.kind === "topic" ? topics.find((candidate) => candidate.id === item.id) : undefined;
-    if (group && group.parentId !== parentId) void saveGroup(group, group.name, parentId);
-    if (topic && topic.groupId !== parentId) void saveTopic(topic, topic.name, parentId);
+    if (group) void saveGroup(group, group.name, parentId, position);
+    if (topic) void saveTopic(topic, topic.name, parentId, position);
   }
 
-  async function addFolder() {
-    const taken = new Set(groups.filter((group) => !group.parentId).map((group) => group.name.toLocaleLowerCase()));
+  // Creates a placeholder topic in a folder and opens it for renaming.
+  async function addTopicIn(groupId: string) {
+    const taken = new Set(topics.map((topic) => topic.name.toLocaleLowerCase()));
+    let name = "New topic";
+    for (let count = 2; taken.has(name.toLocaleLowerCase()); count++) name = `New topic ${count}`;
+    try {
+      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name, groupId }) });
+      await refresh();
+      startEditing(topic.id, true);
+      toggleFolder(groupId, true);
+      revealAndFlash(topic.id, groupId);
+    } catch (e) { failed("Could not add topic")(e); }
+  }
+
+  async function addFolder(parentId: string | null = null) {
+    const taken = new Set(groups.filter((group) => group.parentId === parentId).map((group) => group.name.toLocaleLowerCase()));
     let name = "New folder";
     for (let count = 2; taken.has(name.toLocaleLowerCase()); count++) name = `New folder ${count}`;
     try {
-      const group = await api<Group>(`/api/subjects/${id}/groups`, { method: "POST", headers: json, body: JSON.stringify({ name }) });
+      const group = await api<Group>(`/api/subjects/${id}/groups`, { method: "POST", headers: json, body: JSON.stringify({ name, parentId }) });
       setGroups((current) => [...current, group]);
-      setEditingId(group.id);
-      flash(group.id);
+      startEditing(group.id, true);
+      if (parentId) toggleFolder(parentId, true);
+      revealAndFlash(group.id, parentId);
     } catch (e) { failed("Could not add folder")(e); }
   }
 
@@ -284,7 +309,7 @@ function SubjectContent() {
   const treeActions: TreeActions = {
     openTopic: (topic) => void showTopic(topic), openGroup: (group) => void showGroup(group),
     saveTopic: (topic, name, groupId) => void saveTopic(topic, name, groupId), saveGroup: (group, name, parentId) => void saveGroup(group, name, parentId),
-    removeTopic, removeGroup, move: moveItem, editingId, setEditingId,
+    removeTopic, removeGroup, addFolder: (parentId) => void addFolder(parentId), addTopic: (groupId) => void addTopicIn(groupId), move: moveItem, editingId, renameOnly, setEditingId: startEditing,
   };
 
   async function uploadFiles(fileList: FileList | null) {

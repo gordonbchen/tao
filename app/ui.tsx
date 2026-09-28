@@ -2,7 +2,7 @@
 
 // Shared UI primitives. Pages compose these and add only layout utilities.
 // Follow the UI style guide in AGENTS.md before adding a variant or a new primitive.
-import { useEffect, useRef, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useRef, type ComponentProps, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 
@@ -94,6 +94,54 @@ export function Modal({ title, label, subtitle, onClose, wide, children }: Modal
       </div>
       {children}
     </div>
+  </div>;
+}
+
+export type MenuItem = { label: string; icon?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void };
+
+// Right-click menu at a viewport point. Escape, an outside click, scrolling, or resizing closes it;
+// arrow keys move between items.
+export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: number; label: string; items: MenuItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; });
+  useEffect(() => {
+    const menu = ref.current;
+    if (!menu) return;
+    // Keep the menu inside the viewport, then focus its first item for keyboard use.
+    const { width, height } = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
+    menu.querySelector<HTMLButtonElement>("button:enabled")?.focus();
+    const dismiss = (event: Event) => { if (!(event.target instanceof Node && menu.contains(event.target))) close.current(); };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); close.current(); } };
+    const onBlur = () => close.current();
+    window.addEventListener("pointerdown", dismiss, true);
+    window.addEventListener("scroll", onBlur, true);
+    window.addEventListener("resize", onBlur);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss, true);
+      window.removeEventListener("scroll", onBlur, true);
+      window.removeEventListener("resize", onBlur);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [x, y]);
+  const moveFocus = (event: ReactKeyboardEvent) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:enabled") ?? [])];
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+  };
+  return <div ref={ref} role="menu" aria-label={label} onKeyDown={moveFocus} onContextMenu={(event) => event.preventDefault()}
+    className="fixed z-30 min-w-48 rounded-md border border-line bg-paper p-1 shadow-float" style={{ left: x, top: y }}>
+    {items.map((item) => <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
+      onClick={() => { onClose(); item.onSelect(); }}
+      className={cn("flex h-control-sm w-full items-center gap-2 rounded-md px-3 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+        item.danger ? "hover:enabled:bg-danger-soft hover:enabled:text-danger focus-visible:text-danger" : "hover:enabled:bg-hover")}>
+      {item.icon && <span className="flex-none text-muted">{item.icon}</span>}{item.label}
+    </button>)}
   </div>;
 }
 

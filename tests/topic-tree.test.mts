@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTree, cleanPath, descendantGroupIds, flattenTree, groupPath, outline, parsePlacements, treeFromPaths } from "../lib/topic-tree.ts";
+import { buildTree, cleanPath, descendantGroupIds, flattenTree, groupPath, outline, parsePlacements, positionAt, siblingPositions, treeFromPaths } from "../lib/topic-tree.ts";
 
 const groups = [
   { id: "analysis", name: "Analysis", parentId: null },
@@ -62,4 +62,21 @@ test("turns proposed paths into a previewable tree, merging folder names case-in
     { folder: "Analysis", contents: [{ folder: "Sequences", contents: ["Limits", "Series"] }] },
     "Groups",
   ]);
+});
+
+test("sorts folders and topics together by position, keeping folders first on ties", () => {
+  const groups = [{ id: "g1", name: "Later folder", parentId: null, position: 3 }, { id: "g2", name: "Unplaced", parentId: null }];
+  const topics = [{ id: "t1", name: "First", groupId: null, position: -1 }, { id: "t2", name: "Middle", groupId: null, position: 2 }, { id: "t3", name: "Tie", groupId: null }];
+  assert.deepEqual(buildTree(groups, topics).map((node) => node.kind === "group" ? node.group.id : node.topic.id), ["t1", "g2", "t3", "t2", "g1"]);
+});
+
+test("places a dragged item between, before, or after its new siblings", () => {
+  const groups = [{ id: "g", name: "Folder", parentId: null, position: 1 }];
+  const topics = [{ id: "a", name: "A", groupId: null, position: 2 }, { id: "b", name: "B", groupId: null, position: 4 }, { id: "c", name: "C", groupId: "g", position: 5 }];
+  const top = siblingPositions(groups, topics, null, "a").map((item) => item.position);
+  assert.deepEqual(top, [1, 4]);
+  assert.equal(positionAt(top, 0), 0);
+  assert.equal(positionAt(top, 1), 2.5);
+  assert.equal(positionAt(top, 2), 5);
+  assert.equal(positionAt([], 0), 0);
 });
