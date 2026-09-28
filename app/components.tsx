@@ -195,12 +195,12 @@ function AIAccounts({ providers, refresh, close }: { providers: AIProviderStatus
     <ul className="simple-list">{providers.map(provider => <li key={provider.id} className="account-row">
       <div><strong>{provider.label}</strong><span>{!provider.running ? "Sidecar not running" : provider.signedIn ? "Signed in" : "Not signed in"}</span></div>
       {provider.running && (provider.signedIn
-        ? <button className="button button-small" disabled={busy === provider.id} onClick={() => void act(provider.id, "logout")}>Sign out</button>
-        : <button className="button button-primary button-small" disabled={busy === provider.id} onClick={() => void act(provider.id, "start")}>{signIn?.provider === provider.id ? "Restart" : "Sign in"}</button>)}
+        ? <button className="button" disabled={busy === provider.id} onClick={() => void act(provider.id, "logout")}>Sign out</button>
+        : <button className="button button-primary" disabled={busy === provider.id} onClick={() => void act(provider.id, "start")}>{signIn?.provider === provider.id ? "Restart" : "Sign in"}</button>)}
       {signIn?.provider === provider.id && <div className="account-signin">
         {signIn.needsCode
           ? <><p>1. <a href={signIn.url} target="_blank" rel="noreferrer">Open the {provider.label} sign-in page</a> and approve access.<br />2. Paste the code it shows:</p>
-            <form onSubmit={e => { e.preventDefault(); void act(provider.id, "code"); }}><input aria-label={`${provider.label} sign-in code`} value={code} onChange={e => setCode(e.target.value)} autoFocus /><button className="button button-primary button-small" disabled={!code.trim() || busy === provider.id}>{busy === provider.id ? "Checking…" : "Finish"}</button></form></>
+            <form onSubmit={e => { e.preventDefault(); void act(provider.id, "code"); }}><input aria-label={`${provider.label} sign-in code`} value={code} onChange={e => setCode(e.target.value)} autoFocus /><button className="button button-primary" disabled={!code.trim() || busy === provider.id}>{busy === provider.id ? "Checking…" : "Finish"}</button></form></>
           : <p>1. <a href={signIn.url} target="_blank" rel="noreferrer">Open the {provider.label} sign-in page</a>.<br />2. Enter this code: <code>{signIn.code}</code><br /><span className="account-wait"><span className="spinner" />Waiting for approval…</span></p>}
       </div>}
     </li>)}</ul>
