@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import { protectMathFromMarkdown } from "@/lib/markdown-math";
 
 type MathJaxApi = {
   typesetPromise: (elements: HTMLElement[]) => Promise<void>;
@@ -73,8 +74,6 @@ export function MarkdownMathText({ text, className }: { text: string; className?
     }).catch(() => {});
     return () => { active = false; window.MathJax?.typesetClear?.([element]); };
   }, [text]);
-  // CommonMark treats backslashes before parentheses and brackets as escapes.
-  // Double them so MathJax still sees the TeX delimiters after Markdown parsing.
-  const markdown = text.replace(/\\([()[\]])/g, "\\\\$1");
+  const markdown = protectMathFromMarkdown(text);
   return <div ref={ref} className={["markdown", className].filter(Boolean).join(" ")}><ReactMarkdown key={text}>{markdown}</ReactMarkdown></div>;
 }
