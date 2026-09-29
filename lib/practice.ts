@@ -1,13 +1,14 @@
 import { generateProblem, type AiOptions } from "@/lib/ai";
+import type { Diagram } from "@/lib/diagrams";
 import { LOCAL_OWNER_ID, query } from "@/lib/db";
 import { isNearDuplicatePrompt } from "@/lib/problem-quality";
 import { chooseProblemDifficulty } from "@/lib/scheduler";
 import { inSelection, selectionCte, selectionKey, selectionParams, type Selection } from "@/lib/selection";
 
 export type PracticeTopic = { id: string; name: string; coverageSummary: string };
-type ServedProblem = { id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; createdAt: Date };
+type ServedProblem = { id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; diagram: Diagram | null; createdAt: Date };
 type Review = { lastRating: string | null; lastCorrectness: string | null; repetitions: number; dueAt: Date };
-const problemColumns = `p.id, p.topic_id AS "topicId", t.name AS "topicName", p.prompt, p.difficulty, p.source_refs AS "sourceRefs", p.created_at AS "createdAt"`;
+const problemColumns = `p.id, p.topic_id AS "topicId", t.name AS "topicName", p.prompt, p.difficulty, p.source_refs AS "sourceRefs", p.diagram, p.created_at AS "createdAt"`;
 
 // Picks the requested topic, or the most due confirmed topic in the selection, preferring one other than `avoidTopicId`.
 export async function pickTopic(subjectId: string, selection: Selection, avoidTopicId?: string) {
@@ -41,8 +42,9 @@ export async function topicExcerpts(subjectId: string, topic: { id: string; name
 }
 
 // Generates and stores a problem. Ready problems stay unserved until `takeReadyProblem` hands them out.
+// A ready problem is dropped (null) if the subject's diagram setting changed while it was being written.
 export async function createProblem(subjectId: string, topic: PracticeTopic, aiOptions: AiOptions, { ready = false } = {}) {
-  const subject = await query<{ name: string }>("SELECT name FROM subjects WHERE id = $1 AND owner_id = $2", [subjectId, LOCAL_OWNER_ID]);
+  const subject = await query<{ name: string; diagrams: boolean }>("SELECT name, diagrams FROM subjects WHERE id = $1 AND owner_id = $2", [subjectId, LOCAL_OWNER_ID]);
   const difficulty = chooseProblemDifficulty(await topicReview(topic.id));
   const { excerpts, sources } = await topicExcerpts(subjectId, topic);
   const recentResult = await query<{ prompt: string }>(
@@ -65,19 +67,22 @@ export async function createProblem(subjectId: string, topic: PracticeTopic, aiO
     ...subjectFeedbackResult.rows.map((row) => ({ ...row, note: row.note.slice(0, 350), scope: "this subject" as const })),
   ];
   const context = { subject: subject.rows[0].name, topic: topic.name, coverageSummary: topic.coverageSummary, difficulty, excerpts, recentPrompts, recentFeedback };
-  let generated = await generateProblem(context, aiOptions);
+  const diagrams = subject.rows[0].diagrams;
+  let generated = await generateProblem(context, aiOptions, diagrams);
   if (isNearDuplicatePrompt(generated.prompt, recentPrompts)) {
     const avoidPrompts = [generated.prompt, ...recentPrompts].slice(0, 6);
-    generated = await generateProblem({ ...context, recentPrompts: avoidPrompts }, aiOptions);
+    generated = await generateProblem({ ...context, recentPrompts: avoidPrompts }, aiOptions, diagrams);
     if (isNearDuplicatePrompt(generated.prompt, avoidPrompts)) throw new Error("The tutor repeated a recent problem. Try again for a different question.");
   }
   const allowedSources = new Set(sources);
   const sourceRefs = generated.sourceRefs.filter((source) => allowedSources.has(source));
-  const result = await query<Omit<ServedProblem, "topicName">>(`INSERT INTO problems(subject_id, topic_id, prompt, solution, hints, difficulty, source_refs, generation_metadata, served_at)
-    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, CASE WHEN $9 THEN NULL ELSE now() END)
-    RETURNING id, topic_id AS "topicId", prompt, difficulty, source_refs AS "sourceRefs", created_at AS "createdAt"`,
-  [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider, model: generated.model }), ready]);
-  return { ...result.rows[0], topicName: topic.name } satisfies ServedProblem;
+  const result = await query<Omit<ServedProblem, "topicName">>(`INSERT INTO problems(subject_id, topic_id, prompt, solution, hints, difficulty, source_refs, generation_metadata, served_at, diagram, solution_diagram)
+    SELECT $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, CASE WHEN $9 THEN NULL ELSE now() END, $10::jsonb, $11::jsonb
+    FROM subjects s WHERE s.id = $1 AND (NOT $9 OR s.diagrams = $12)
+    RETURNING id, topic_id AS "topicId", prompt, difficulty, source_refs AS "sourceRefs", diagram, created_at AS "createdAt"`,
+  [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider, model: generated.model }), ready,
+    generated.diagram && JSON.stringify(generated.diagram), generated.solutionDiagram && JSON.stringify(generated.solutionDiagram), diagrams]);
+  return result.rows[0] ? { ...result.rows[0], topicName: topic.name } satisfies ServedProblem : null;
 }
 
 // Serves the subject's waiting problem if it matches the selection.
@@ -139,8 +144,11 @@ export function prepareReadyProblem(subjectId: string, aiOptions: AiOptions, sel
     const waiting = await query(`${selectionCte} SELECT 1 FROM problems p JOIN topics t ON t.id = p.topic_id AND t.coverage_confirmed
       WHERE p.subject_id = $2 AND p.served_at IS NULL AND ${inSelection} LIMIT 1`, selectionParams(subjectId, selection));
     if (waiting.rowCount) return;
-    const topic = await pickTopic(subjectId, selection, avoidTopicId);
-    if (topic) await createProblem(subjectId, topic, aiOptions, { ready: true });
+    // A second try covers a diagram setting change during the first.
+    for (let tries = 0; tries < 2; tries++) {
+      const topic = await pickTopic(subjectId, selection, avoidTopicId);
+      if (!topic || await createProblem(subjectId, topic, aiOptions, { ready: true })) return;
+    }
   })().catch((error) => {
     console.error("Could not prepare a practice problem", error instanceof Error ? error.message : error);
   }).finally(() => preparing.delete(key));

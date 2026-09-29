@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, CircleHelp, List as ListIcon, RotateCcw, ThumbsUp, TriangleAlert } from "lucide-react";
+import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { api, notifyAiSetupRequired, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
+import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
 import { Badge, Button, Card, cn, ErrorMessage, Input, Modal, Spinner, Textarea, ToggleButton } from "../../ui";
 import { selectionQuery, type StudySelection } from "./selection";
 
-type Problem = { id: string; topicId: string; prompt: string; difficulty: string; isReview?: boolean; messages?: ChatMessage[] };
+type Problem = { id: string; topicId: string; prompt: string; difficulty: string; diagram?: DiagramData | null; isReview?: boolean; messages?: ChatMessage[] };
 type Correctness = "correct" | "partial" | "incorrect" | "uncertain";
-type Feedback = { feedback: string; correctness: Correctness; solution?: string };
+type Feedback = { feedback: string; correctness: Correctness; solution?: string; solutionDiagram?: DiagramData | null };
 type Attempt = Feedback & { answer: string; rating: string };
 type PastProblem = { id: string; topicName: string | null; prompt: string; difficulty: string; createdAt: string; attempts: number; correctness: Correctness | null; skipped: boolean };
 const resultLabels: Record<Correctness, string> = { correct: "Correct", partial: "Partly right", incorrect: "Incorrect", uncertain: "Unsure" };
@@ -162,6 +164,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
           <Button size="sm" variant="ghost" className="ml-auto text-muted" onClick={() => openProblemFeedback(feedback ? "feedback" : "skip")} disabled={working || feedbackMode !== null}>{feedback ? "Give feedback" : "Skip"}</Button>
         </div>
         <MathText className="text-lg leading-relaxed whitespace-pre-wrap" text={problem.prompt} />
+        {problem.diagram && <Diagram className="mt-6" diagram={problem.diagram} />}
       </Card>
       {feedbackMode && <Card className="p-4"><form onSubmit={submitProblemFeedback}>
         <div className="mb-3 text-sm font-semibold">What should change? <span className="font-normal text-muted">Optional</span></div>
@@ -181,7 +184,10 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
       </form></Card> : <section className={cn("rounded-lg border p-6 max-sm:p-4", feedbackTone)}>
         <div className="mb-3 inline-flex items-center gap-2 font-semibold"><FeedbackIcon size={18} />{correctnessLabel}</div>
         <MathText className="leading-relaxed whitespace-pre-wrap" text={feedback.feedback} />
-        {showSolution && feedback.solution && <MathText className="mt-4 border-t border-line pt-4 leading-relaxed whitespace-pre-wrap" text={feedback.solution} />}
+        {showSolution && feedback.solution && <div className="mt-4 border-t border-line pt-4">
+          <MathText className="leading-relaxed whitespace-pre-wrap" text={feedback.solution} />
+          {feedback.solutionDiagram && <Diagram className="mt-4" diagram={feedback.solutionDiagram} />}
+        </div>}
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           {feedback.solution && <Button variant="ghost" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide solution" : "Show solution"}</Button>}
           <Button variant="ghost" onClick={() => { setFeedback(null); setShowSolution(false); }} disabled={working}><RotateCcw size={16} />Try again</Button>

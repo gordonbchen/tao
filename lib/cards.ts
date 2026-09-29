@@ -1,12 +1,14 @@
 import { LOCAL_OWNER_ID, query } from "@/lib/db";
+import type { Diagram } from "@/lib/diagrams";
 import type { CardSchedule } from "@/lib/flashcards";
 import { inSelection, selectionCte, selectionParams, type Selection } from "@/lib/selection";
 
-export type CardRow = CardSchedule & { id: string; topicId: string | null; topicName: string | null; front: string; back: string };
+export type CardRow = CardSchedule & { id: string; topicId: string | null; topicName: string | null; front: string; back: string; frontDiagram: Diagram | null; backDiagram: Diagram | null };
 
 const scheduleColumns = `c.due, c.stability, c.difficulty, c.elapsed_days AS "elapsedDays", c.scheduled_days AS "scheduledDays",
   c.learning_steps AS "learningSteps", c.reps, c.lapses, c.state, c.last_review AS "lastReview"`;
-export const cardColumns = `c.id, c.topic_id AS "topicId", t.name AS "topicName", c.front, c.back, ${scheduleColumns}`;
+export const cardColumns = `c.id, c.topic_id AS "topicId", t.name AS "topicName", c.front, c.back,
+  c.front_diagram AS "frontDiagram", c.back_diagram AS "backDiagram", ${scheduleColumns}`;
 
 // Cards in the selection; an empty selection also includes cards without a topic.
 const cardsInSelection = `${selectionCte} SELECT ${cardColumns} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id

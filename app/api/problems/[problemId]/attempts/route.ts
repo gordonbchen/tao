@@ -1,5 +1,6 @@
 import { aiOptionsFromRequest, checkAnswer, hasAiProvider, type Correctness, type Rating } from "@/lib/ai";
 import { LOCAL_OWNER_ID, isUuid, jsonError, query, transaction } from "@/lib/db";
+import { withFigure, type Diagram } from "@/lib/diagrams";
 import { nextReview } from "@/lib/domain";
 type RouteContext = { params: Promise<{ problemId: string }> };
 const ratings: Rating[] = ["easy", "okay", "hard", "could_not_solve"];
@@ -14,14 +15,15 @@ export async function POST(request: Request, { params }: RouteContext) {
   const rating = body.difficulty;
   if (!answer || answer.length > 20_000) return jsonError("Answer must be between 1 and 20,000 characters");
   if (!rating || !ratings.includes(rating)) return jsonError("Choose easy, okay, hard, or could_not_solve");
-  const problemResult = await query<{ prompt: string; solution: string; topicId: string | null }>(`SELECT p.prompt, p.solution, p.topic_id AS "topicId" FROM problems p
+  const problemResult = await query<{ prompt: string; solution: string; topicId: string | null; diagram: Diagram | null; solutionDiagram: Diagram | null }>(`SELECT p.prompt, p.solution,
+    p.topic_id AS "topicId", p.diagram, p.solution_diagram AS "solutionDiagram" FROM problems p
     JOIN subjects s ON s.id = p.subject_id WHERE p.id = $1 AND s.owner_id = $2`, [problemId, LOCAL_OWNER_ID]);
   const problem = problemResult.rows[0];
   if (!problem) return jsonError("Problem not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
   if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before checking answers", 409);
   let checked: { feedback: string; correctness: Correctness };
-  try { checked = await checkAnswer(problem, answer, aiOptions); }
+  try { checked = await checkAnswer({ prompt: withFigure(problem.prompt, problem.diagram), solution: withFigure(problem.solution, problem.solutionDiagram, "Solution figure") }, answer, aiOptions); }
   catch { return jsonError("The tutor could not check this answer. Check the configured AI provider or try again.", 502); }
   const saved = await transaction(async (client) => {
     const attempt = await client.query(`INSERT INTO attempts(problem_id, answer, rating, correctness, feedback)
@@ -43,5 +45,5 @@ export async function POST(request: Request, { params }: RouteContext) {
     await client.query("INSERT INTO tutor_messages(problem_id, role, kind, content) VALUES ($1, 'tutor', 'answer_check', $2)", [problemId, checked.feedback]);
     return { attempt: attempt.rows[0], review };
   });
-  return Response.json({ ...saved, feedback: saved.attempt.feedback, correctness: saved.attempt.correctness, solution: problem.solution });
+  return Response.json({ ...saved, feedback: saved.attempt.feedback, correctness: saved.attempt.correctness, solution: problem.solution, solutionDiagram: problem.solutionDiagram });
 }

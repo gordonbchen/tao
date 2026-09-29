@@ -6,7 +6,7 @@ import Image from "next/image";
 import { KeyRound, Moon, Sun } from "lucide-react";
 import { Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Select, Spinner } from "./ui";
 
-export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
+export type Subject = { id: string; name: string; topicCount: number; dueCount: number; diagrams?: boolean };
 
 type AIProviderStatus = { id: string; label: string; running: boolean; signedIn: boolean };
 type AIStatus = { available: boolean; providers: AIProviderStatus[]; models: { id: string; provider: string }[]; defaultModel: string };

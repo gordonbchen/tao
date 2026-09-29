@@ -21,6 +21,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   return Response.json({
     counts,
     card: card && { id: card.id, topicId: card.topicId, topicName: card.topicName, front: card.front, back: card.back, state: card.state,
+      frontDiagram: card.frontDiagram, backDiagram: card.backDiagram,
       intervals: nextIntervals(card), messages: await chatMessages({ cardId: card.id }) },
   });
 }

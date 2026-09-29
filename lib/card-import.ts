@@ -107,10 +107,10 @@ export function parseApkg(data: Uint8Array): CardDraft[] {
 }
 
 // Trims drafts to the stored limits and drops empty or duplicate fronts.
-export function cleanDrafts(drafts: CardDraft[]) {
+export function cleanDrafts<T extends CardDraft>(drafts: T[]) {
   const seen = new Set<string>();
-  return drafts.flatMap(({ front, back }) => {
-    const card = { front: front.trim().slice(0, 4000), back: back.trim().slice(0, 8000) };
+  return drafts.flatMap((draft) => {
+    const card = { ...draft, front: draft.front.trim().slice(0, 4000), back: draft.back.trim().slice(0, 8000) };
     const key = card.front.toLocaleLowerCase();
     if (!card.front || seen.has(key)) return [];
     seen.add(key);

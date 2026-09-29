@@ -2,19 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { List as ListIcon, Pencil, Plus, Sparkles, Upload } from "lucide-react";
+import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { buildTree, flattenTree, groupPath, type TreeGroup, type TreeTopic } from "@/lib/topic-tree";
 import { api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDelete, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
+import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
 import { Badge, Button, Card, cn, ErrorMessage, IconButton, Input, Modal, Select, Spinner, Textarea } from "../../ui";
 import { selectionQuery, type StudySelection } from "./selection";
 
 type Rating = 1 | 2 | 3 | 4;
-type ReviewCard = { id: string; topicId: string | null; topicName: string | null; front: string; back: string; intervals: Record<Rating, string>; messages: ChatMessage[] };
+type Figures = { frontDiagram?: DiagramData | null; backDiagram?: DiagramData | null };
+type ReviewCard = Figures & { id: string; topicId: string | null; topicName: string | null; front: string; back: string; intervals: Record<Rating, string>; messages: ChatMessage[] };
 type Counts = { new: number; learning: number; review: number; total: number; nextDue: string | null };
-type StoredCard = { id: string; topicId: string | null; topicName: string | null; front: string; back: string; due: string; state: number };
-type Draft = { front: string; back: string };
-type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit"; card: { id: string; topicId: string | null; front: string; back: string } };
+type StoredCard = Figures & { id: string; topicId: string | null; topicName: string | null; front: string; back: string; due: string; state: number };
+type Draft = Figures & { front: string; back: string };
+type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit"; card: Figures & { id: string; topicId: string | null; front: string; back: string } };
 const ratingLabels: { value: Rating; label: string }[] = [{ value: 1, label: "Again" }, { value: 2, label: "Hard" }, { value: 3, label: "Good" }, { value: 4, label: "Easy" }];
 
 const jsonHeaders = () => ({ ...getAiRequestHeaders(), "Content-Type": "application/json" });
@@ -121,7 +124,11 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
               <IconButton size="sm" className="ml-auto" label="Edit card" onClick={() => setDialog({ kind: "edit", card })}><Pencil size={16} /></IconButton>
             </div>
             <MathText className="text-lg leading-relaxed whitespace-pre-wrap" text={card.front} />
-            {revealed && <MathText className="mt-6 border-t border-line pt-6 leading-relaxed whitespace-pre-wrap" text={card.back || "(No back)"} />}
+            {card.frontDiagram && <Diagram className="mt-6" diagram={card.frontDiagram} />}
+            {revealed && <div className="mt-6 border-t border-line pt-6">
+              <MathText className="leading-relaxed whitespace-pre-wrap" text={card.back || "(No back)"} />
+              {card.backDiagram && <Diagram className="mt-6" diagram={card.backDiagram} />}
+            </div>}
           </Card>
           {!revealed ? <Button variant="primary" className="self-center" onClick={() => setRevealed(true)}>Show answer</Button>
             : <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2" role="group" aria-label="How well did you remember it?">
@@ -165,12 +172,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // Adds cards one after another (staying open), or edits one card.
 function CardEditor({ subjectId, topics, groups, card, topicId: initialTopicId, onClose, onDelete }: {
-  subjectId: string; topics: TreeTopic[]; groups: TreeGroup[]; card?: { id: string; front: string; back: string }; topicId: string | null;
+  subjectId: string; topics: TreeTopic[]; groups: TreeGroup[]; card?: Figures & { id: string; front: string; back: string }; topicId: string | null;
   onClose: (changed: boolean) => void; onDelete?: (id: string) => void;
 }) {
   const [front, setFront] = useState(card?.front ?? "");
   const [back, setBack] = useState(card?.back ?? "");
   const [topicId, setTopicId] = useState(initialTopicId);
+  const [removed, setRemoved] = useState<{ front?: boolean; back?: boolean }>({});
   const [saving, setSaving] = useState(false);
   const [added, setAdded] = useState(0);
   const [error, setError] = useState("");
@@ -181,7 +189,8 @@ function CardEditor({ subjectId, topics, groups, card, topicId: initialTopicId, 
     setSaving(true); setError("");
     try {
       if (card) {
-        await api(`/api/cards/${card.id}`, { method: "PATCH", headers: jsonHeaders(), body: JSON.stringify({ front, back, topicId }) });
+        await api(`/api/cards/${card.id}`, { method: "PATCH", headers: jsonHeaders(), body: JSON.stringify({ front, back, topicId,
+          ...(removed.front ? { frontDiagram: null } : {}), ...(removed.back ? { backDiagram: null } : {}) }) });
         onClose(true);
       } else {
         await api(`/api/subjects/${subjectId}/cards`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ cards: [{ front, back }], topicId, source: "manual" }) });
@@ -195,7 +204,9 @@ function CardEditor({ subjectId, topics, groups, card, topicId: initialTopicId, 
     <form className="flex flex-col gap-4" onSubmit={save}>
       <Field label="Topic"><TopicSelect topics={topics} groups={groups} value={topicId} onChange={setTopicId} allowNone /></Field>
       <Field label="Front"><Textarea rows={3} value={front} maxLength={4000} onChange={(event) => setFront(event.target.value)} autoFocus placeholder="Question or prompt. Use \( … \) for math." /></Field>
+      {card?.frontDiagram && !removed.front && <FigureRow diagram={card.frontDiagram} onRemove={() => setRemoved((current) => ({ ...current, front: true }))} />}
       <Field label="Back"><Textarea rows={4} value={back} maxLength={8000} onChange={(event) => setBack(event.target.value)} placeholder="Answer" /></Field>
+      {card?.backDiagram && !removed.back && <FigureRow diagram={card.backDiagram} onRemove={() => setRemoved((current) => ({ ...current, back: true }))} />}
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {added > 0 && <span className="mr-auto text-sm text-muted" role="status">{added} added</span>}
@@ -207,6 +218,14 @@ function CardEditor({ subjectId, topics, groups, card, topicId: initialTopicId, 
   </Modal>;
 }
 
+// A card's figure in the editor, which can be removed but not edited.
+function FigureRow({ diagram, onRemove }: { diagram: DiagramData; onRemove: () => void }) {
+  return <div className="flex items-start gap-2">
+    <Diagram className="min-w-0 flex-1 rounded-md border border-line p-2" diagram={diagram} />
+    <Button size="sm" variant="ghost" onClick={onRemove}>Remove figure</Button>
+  </div>;
+}
+
 // A preview of cards before saving. With `kept`, each card has a checkbox.
 function DraftList({ drafts, kept, onToggle }: { drafts: Draft[]; kept?: Set<number>; onToggle?: (index: number) => void }) {
   const shown = kept ? drafts : drafts.slice(0, 50);
@@ -216,8 +235,14 @@ function DraftList({ drafts, kept, onToggle }: { drafts: Draft[]; kept?: Set<num
         <label className={cn("flex gap-3 py-3 text-sm", kept && "cursor-pointer")}>
           {kept && <input type="checkbox" className="mt-1 size-4 flex-none accent-accent" checked={kept.has(index)} onChange={() => onToggle?.(index)} />}
           <span className="grid min-w-0 flex-1 grid-cols-2 gap-4 max-sm:grid-cols-1">
-            <MathText className="min-w-0 whitespace-pre-wrap" text={draft.front} />
-            <MathText className="min-w-0 whitespace-pre-wrap text-muted" text={draft.back} />
+            <span className="min-w-0">
+              <MathText className="whitespace-pre-wrap" text={draft.front} />
+              {draft.frontDiagram && <Diagram className="mt-2" diagram={draft.frontDiagram} />}
+            </span>
+            <span className="min-w-0 text-muted">
+              <MathText className="whitespace-pre-wrap" text={draft.back} />
+              {draft.backDiagram && <Diagram className="mt-2" diagram={draft.backDiagram} />}
+            </span>
           </span>
         </label>
       </li>)}

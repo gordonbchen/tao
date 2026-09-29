@@ -30,9 +30,9 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (unfinished) return Response.json({ problem: unfinished });
   const topic = await pickTopic(subjectId, selection);
   if (!topic) return jsonError("Add and confirm at least one covered topic before generating practice", 409);
-  const lastAttemptResult = await query<{ id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; createdAt: Date; lastAttemptAt: Date; rating: string; correctness: string }>(
+  const lastAttemptResult = await query<{ id: string; topicId: string; topicName: string; prompt: string; difficulty: string; sourceRefs: string[]; diagram: unknown; createdAt: Date; lastAttemptAt: Date; rating: string; correctness: string }>(
     `SELECT p.id, p.topic_id AS "topicId", t.name AS "topicName", p.prompt, p.difficulty,
-      p.source_refs AS "sourceRefs", p.created_at AS "createdAt", latest.rating, latest.correctness, latest.created_at AS "lastAttemptAt"
+      p.source_refs AS "sourceRefs", p.diagram, p.created_at AS "createdAt", latest.rating, latest.correctness, latest.created_at AS "lastAttemptAt"
      FROM problems p JOIN topics t ON t.id = p.topic_id
      JOIN LATERAL (SELECT a.rating, a.correctness, a.created_at FROM attempts a WHERE a.problem_id = p.id
        ORDER BY a.created_at DESC LIMIT 1) latest ON true
@@ -46,11 +46,12 @@ export async function POST(request: Request, { params }: RouteContext) {
     return Response.json({ problem: {
       id: lastAttempt.id, topicId: lastAttempt.topicId, topicName: lastAttempt.topicName,
       prompt: lastAttempt.prompt, difficulty: lastAttempt.difficulty, sourceRefs: lastAttempt.sourceRefs,
-      createdAt: lastAttempt.createdAt, isReview: true,
+      diagram: lastAttempt.diagram, createdAt: lastAttempt.createdAt, isReview: true,
     } });
   }
   try {
     const problem = await takeOrAwaitReadyProblem(subjectId, selection) ?? await createProblem(subjectId, topic, aiOptions);
+    if (!problem) throw new Error("A problem served at once is always stored");
     // Prepare the next problem for the same selection while the student works on this one; across topics, prefer a different one.
     const singleTopic = selection.topicIds.length === 1 && !selection.groupIds.length;
     after(() => prepareReadyProblem(subjectId, aiOptions, selection, singleTopic ? undefined : problem.topicId));
