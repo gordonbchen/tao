@@ -113,6 +113,25 @@ export async function suggestHint(problem: { prompt: string; solution: string },
   return typeof value.hint === "string" ? value.hint.slice(0, 1200) : undefined;
 }
 
+export async function generateCards(context: { subject: string; topic: string; coverageSummary: string; excerpts: string[]; existingFronts: string[]; count: number }, options: AiOptions = {}) {
+  const { value, provider, model } = await jsonFromConfiguredProvider<{ cards?: unknown }>(
+    `Write spaced-repetition flashcards for a student's course topic, using only the supplied topic coverage and source passages. Each card tests one fact, definition, statement, or short reasoning step that the materials support. The front is a specific question or prompt that has one clear answer; the back is that answer, brief enough to check at a glance, with a one-line justification when it helps. Prefer understanding over trivia, and do not duplicate or trivially reword any existing front. Return JSON with cards, an array of about the requested count of objects with front and back strings. ${PLAIN_MATH_TEXT}`,
+    JSON.stringify(context), "flashcards", options);
+  const cards = Array.isArray(value.cards) ? value.cards.filter((card): card is { front: string; back: string } => typeof card?.front === "string" && typeof card?.back === "string") : [];
+  if (!cards.length) throw new Error("AI returned no flashcards");
+  return { cards: cards.slice(0, 50), provider, model };
+}
+
+// One tutor reply about a flashcard. Before the student reveals the back, the tutor hints without giving it away.
+export async function tutorCard(card: { front: string; back: string }, revealed: boolean, studentMessage: string, previous: string[], options: AiOptions = {}) {
+  const { value } = await jsonFromConfiguredProvider<{ hint: string }>(
+    `Act as a patient tutor helping a student with one flashcard. ${revealed
+      ? "The student has seen the answer. Explain, give intuition or an example, or answer their question about it."
+      : "The student has not seen the answer yet. Give a small hint or respond to their question without revealing the answer on the back."} Keep replies short. Return JSON with a single hint string containing your reply. ${PLAIN_MATH_TEXT}`,
+    JSON.stringify({ front: card.front, back: card.back, earlierReplies: previous, studentMessage }), "hint", options);
+  return typeof value.hint === "string" ? value.hint.slice(0, 2000) : undefined;
+}
+
 export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "group_summary" | "topic_placements" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
   return jsonFromConfiguredProvider<unknown>(system, input, kind, options);
 }

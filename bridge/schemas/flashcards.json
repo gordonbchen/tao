@@ -1,0 +1,1 @@
+{"type":"object","properties":{"cards":{"type":"array","items":{"type":"object","properties":{"front":{"type":"string"},"back":{"type":"string"}},"required":["front","back"],"additionalProperties":false}}},"required":["cards"],"additionalProperties":false}

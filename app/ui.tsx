@@ -148,8 +148,8 @@ export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: num
 type Tab<T extends string> = { id: T; label: string; count?: number };
 
 // Underlined tab list. Pages that use it own its keyboard shortcuts.
-export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string }) {
-  return <div role="tablist" aria-label={label} className="-mt-2 mb-4 flex gap-6 border-b border-line">
+export function Tabs<T extends string>({ tabs, value, onChange, label, className }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string; className?: string }) {
+  return <div role="tablist" aria-label={label} className={cn("-mt-2 mb-4 flex gap-6 border-b border-line", className)}>
     {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
       onClick={() => onChange(tab.id)}
       className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>

@@ -145,11 +145,12 @@ function SubjectContent() {
     }).catch(() => {});
   }, [id, aiSettings.configured, hasTopics]);
 
-  function startPractice(target: { topicId?: string; groupId?: string } = {}) {
-    if (!aiSettings.ready) return;
-    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
-    const query = target.topicId ? `?topic=${target.topicId}` : target.groupId ? `?group=${target.groupId}` : "";
-    router.push(`/study/${id}${query}`);
+  // Flashcards work without AI; problems need a signed-in provider. Without a mode, the study page opens the last one used.
+  function startPractice(target: { topicId?: string; groupId?: string } = {}, mode?: "problems" | "cards") {
+    if (mode !== "cards" && !aiSettings.ready) return;
+    if (mode === "problems" && !aiSettings.configured) { notifyAiSetupRequired(); return; }
+    const search = new URLSearchParams([...(mode ? [["mode", mode]] : []), ...(target.topicId ? [["topic", target.topicId]] : []), ...(target.groupId ? [["group", target.groupId]] : [])]);
+    router.push(`/study/${id}${search.size ? `?${search}` : ""}`);
   }
 
   async function addTopic(event: React.FormEvent) {
@@ -582,7 +583,7 @@ function SubjectContent() {
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
       <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
-        <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice the most due topic. Right-click a topic or folder to practice just that.">Practice</Button>
+        <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
       </div>
       {error && <ErrorMessage>{error}</ErrorMessage>}
 

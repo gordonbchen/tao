@@ -4,6 +4,7 @@ import { isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
 import { createProblem, findUnfinishedProblem, pickTopic, prepareReadyProblem, takeOrAwaitReadyProblem, topicReview } from "@/lib/practice";
 import { shouldReuseDueProblem } from "@/lib/scheduler";
+import { selectionFromBody } from "@/lib/selection";
 type RouteContext = { params: Promise<{ subjectId: string }> };
 
 export async function GET(request: Request, { params }: RouteContext) {
@@ -24,12 +25,11 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
   if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before practicing", 409);
-  let body: { topicId?: string; groupId?: string; skipReuse?: boolean };
+  let body: { topicIds?: unknown; groupIds?: unknown; skipReuse?: boolean };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
-  if (body.topicId !== undefined && (typeof body.topicId !== "string" || !isUuid(body.topicId))) return jsonError("Topic not found", 404);
-  if (body.groupId !== undefined && (typeof body.groupId !== "string" || !isUuid(body.groupId))) return jsonError("Folder not found", 404);
   if (body.skipReuse !== undefined && typeof body.skipReuse !== "boolean") return jsonError("skipReuse must be a boolean");
-  const selection = body.topicId ? { topicId: body.topicId } : body.groupId ? { groupId: body.groupId } : {};
+  const selection = selectionFromBody(body);
+  if (typeof selection === "string") return jsonError(selection);
   // Return to a problem the student opened but neither answered nor skipped. skipReuse asks for a new one.
   const unfinished = body.skipReuse ? null : await findUnfinishedProblem(subjectId, selection);
   if (unfinished) return Response.json({ problem: unfinished });
@@ -57,7 +57,8 @@ export async function POST(request: Request, { params }: RouteContext) {
   try {
     const problem = await takeOrAwaitReadyProblem(subjectId, selection) ?? await createProblem(subjectId, topic, aiOptions);
     // Prepare the next problem for the same selection while the student works on this one; across topics, prefer a different one.
-    after(() => prepareReadyProblem(subjectId, aiOptions, body.topicId ? selection : { ...selection, avoidTopicId: problem.topicId }));
+    const singleTopic = selection.topicIds.length === 1 && !selection.groupIds.length;
+    after(() => prepareReadyProblem(subjectId, aiOptions, selection, singleTopic ? undefined : problem.topicId));
     return Response.json({ problem }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error && error.message.startsWith("The tutor repeated") ? error.message : "The tutor could not generate a problem. Check the configured AI provider or try again.";
