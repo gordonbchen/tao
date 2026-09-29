@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
@@ -55,11 +55,11 @@ function SubjectContent() {
   const suggestions = suggestionQueue[0] ?? null;
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
-  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted" | "chat">("summary");
+  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
-  const [topicTab, setTopicTab] = useState<"summary" | "resources" | "chat">("summary");
+  const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
   const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
-  const [groupTab, setGroupTab] = useState<"summary" | "resources" | "chat">("summary");
+  const [groupTab, setGroupTab] = useState<"summary" | "resources">("summary");
   const [summarizingGroupIds, setSummarizingGroupIds] = useState<string[]>([]);
   const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
   const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
@@ -97,6 +97,18 @@ function SubjectContent() {
       return next;
     });
   }
+  // Whether viewers show the chat beside the summary; a per-browser preference.
+  const [chatOpen, setChatOpen] = useState(true);
+  useEffect(() => {
+    try { setChatOpen(localStorage.getItem(chatOpenKey) !== "false"); } catch { /* Show it. */ }
+  }, []);
+  function toggleChat() {
+    setChatOpen((open) => {
+      try { localStorage.setItem(chatOpenKey, String(!open)); } catch { /* Keep it for this visit only. */ }
+      return !open;
+    });
+  }
+  const chatToggle = <IconButton label={chatOpen ? "Hide chat" : "Show chat"} aria-pressed={chatOpen} className="aria-pressed:text-accent" onClick={toggleChat}><MessageSquare size={18} /></IconButton>;
   function flash(itemId: string) {
     setHighlightId(itemId);
     setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
@@ -640,8 +652,8 @@ function SubjectContent() {
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
-      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }, { id: "chat", label: "Chat" }]} />
-      {resourceTab === "summary" ? <section role="tabpanel" aria-label="Model summary">
+      <Tabs label="Resource content" actions={resourceTab === "summary" && chatToggle} value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
+      {resourceTab === "summary" ? <WithChat open={chatOpen} chat={<SavedChat key={resourceText.id} path={`/api/resources/${resourceText.id}/chat`} name={resourceText.filename} className={splitChat} />}><section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
           <MarkdownMathText text={resourceText.modelSummary} />
@@ -649,21 +661,20 @@ function SubjectContent() {
           <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
           {resourceText.extractedText ? <Button variant="primary" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</Button> : noText}
         </div>}
-      </section> : resourceTab === "topics" ? <section role="tabpanel" aria-label="Topics linked to resource">
+      </section></WithChat> : resourceTab === "topics" ? <section role="tabpanel" aria-label="Topics linked to resource">
         {resourceTopicsError && <ErrorMessage>{resourceTopicsError}</ErrorMessage>}
         <LinkPicker noun="topic" target="resource" icon={BookOpen} items={topics} saved={resourceText.topics.map((topic) => topic.id)}
           selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
           suggestions={linkSuggestions[`resource:${resourceText.id}`]} onSuggest={() => loadLinkSuggestions(`resource:${resourceText.id}`, `/api/resources/${resourceText.id}/suggested-topics`)}
           saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
-      </section> : resourceTab === "extracted" ? <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>
-      : <section role="tabpanel" aria-label="Chat about this resource"><SavedChat key={resourceText.id} path={`/api/resources/${resourceText.id}/chat`} name={resourceText.filename} /></section>}
+      </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
 
     {groupDetail && <Modal wide title={groupDetail.name} label={`Folder summary for ${groupDetail.name}`} onClose={() => setGroupDetail(null)}
       subtitle={[...groupPath(groups, groupDetail.parentId), `${groupDetail.topicCount} topic${groupDetail.topicCount === 1 ? "" : "s"}`].join(" › ")}>
-      <Tabs label="Folder content" value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }, { id: "chat", label: "Chat" }]} />
+      <Tabs label="Folder content" actions={groupTab === "summary" && chatToggle} value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }]} />
       {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
-      {groupTab === "summary" ? <section role="tabpanel" aria-label="Folder summary">
+      {groupTab === "summary" ? <WithChat open={chatOpen} chat={<SavedChat key={groupDetail.id} path={`/api/groups/${groupDetail.id}/chat`} name={groupDetail.name} className={splitChat} />}><section role="tabpanel" aria-label="Folder summary">
         {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
           {groupDetail.summaryStatus === "stale" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">This folder&apos;s contents changed. Refresh the summary to reflect them.</p>}
           <MarkdownMathText text={groupDetail.summary} />
@@ -672,8 +683,7 @@ function SubjectContent() {
           <p className="text-muted">{groupDetail.topicCount ? "A short overview of the topics and folders inside." : "Add topics to this folder to summarize it."}</p>
           {groupDetail.topicCount > 0 && <Button variant="primary" onClick={() => void generateGroupSummary(groupDetail.id)}>Create summary</Button>}
         </div>}
-      </section> : groupTab === "chat" ? <section role="tabpanel" aria-label="Chat about this folder"><SavedChat key={groupDetail.id} path={`/api/groups/${groupDetail.id}/chat`} name={groupDetail.name} /></section>
-      : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
+      </section></WithChat> : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
         {groupDetail.resources.length ? <List>{groupDetail.resources.map((resource) => <ListItem key={resource.id}>
           <button type="button" className={rowTitle} onClick={() => { const item = resources.find((candidate) => candidate.id === resource.id); if (item) void showResourceText(item); }}><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button>
         </ListItem>)}</List> : <p className="text-muted">No resources are linked to topics in this folder.</p>}
@@ -696,16 +706,15 @@ function SubjectContent() {
     </Modal>}
 
     {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
-      <Tabs label="Topic content" value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, { id: "chat", label: "Chat" }]} />
+      <Tabs label="Topic content" actions={topicTab === "summary" && chatToggle} value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
-      {topicTab === "summary" ? <section role="tabpanel" aria-label="Topic coverage summary">
+      {topicTab === "summary" ? <WithChat open={chatOpen} chat={<SavedChat key={topicDetail.id} path={`/api/topics/${topicDetail.id}/chat`} name={topicDetail.name} className={splitChat} />}><section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
           {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
         </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
-      </section> : topicTab === "chat" ? <section role="tabpanel" aria-label="Chat about this topic"><SavedChat key={topicDetail.id} path={`/api/topics/${topicDetail.id}/chat`} name={topicDetail.name} /></section>
-      : <section role="tabpanel" aria-label="Resources linked to topic">
+      </section></WithChat> : <section role="tabpanel" aria-label="Resources linked to topic">
         <LinkPicker noun="resource" target="topic" icon={FileText} items={resources.map((resource) => ({ id: resource.id, name: resource.filename }))} saved={topicDetail.resources.map((resource) => resource.id)}
           selected={selectedTopicResources} onSelectedChange={setSelectedTopicResources} search={resourceSearch} onSearchChange={setResourceSearch}
           suggestions={linkSuggestions[`topic:${topicDetail.id}`]} onSuggest={() => loadLinkSuggestions(`topic:${topicDetail.id}`, `/api/topics/${topicDetail.id}/suggested-resources`)}
@@ -716,8 +725,23 @@ function SubjectContent() {
   </Page>;
 }
 
-const resourceTabs = ["summary", "topics", "extracted", "chat"] as const;
-const topicTabs = ["summary", "resources", "chat"] as const;
+const resourceTabs = ["summary", "topics", "extracted"] as const;
+const topicTabs = ["summary", "resources"] as const;
+
+// A viewer's summary with its chat, when open, beside it on wide screens and below it on narrow ones. The chat stays in view
+// while the summary scrolls the modal.
+function WithChat({ open, chat, children }: { open: boolean; chat: ReactNode; children: ReactNode }) {
+  if (!open) return children;
+  return <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:items-start">
+    <div className="min-w-0">{children}</div>
+    <div className="lg:sticky lg:top-0">{chat}</div>
+  </div>;
+}
+
+const chatOpenKey = "tao-viewer-chat";
+
+// Tall enough to fill the modal below its title and tabs.
+const splitChat = "lg:h-[calc(100dvh-14rem)]";
 
 // Returns the item `step` places from `current`, wrapping around; `current` itself if it is not in the list.
 function cycle<T>(items: readonly T[], current: T, step: number) {

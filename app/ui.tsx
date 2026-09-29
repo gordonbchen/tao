@@ -149,14 +149,15 @@ export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: num
 type Tab<T extends string> = { id: T; label: string; count?: number };
 
 // Underlined tab list. Pages that use it own its keyboard shortcuts.
-export function Tabs<T extends string>({ tabs, value, onChange, label, className }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string; className?: string }) {
-  return <div role="tablist" aria-label={label} className={cn("-mt-2 mb-4 flex gap-6 border-b border-line", className)}>
+// `actions` sit at the right end of the tab row.
+export function Tabs<T extends string>({ tabs, value, onChange, label, actions, className }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string; actions?: ReactNode; className?: string }) {
+  return <div className={cn("-mt-2 mb-4 flex items-center gap-6 border-b border-line", className)}><div role="tablist" aria-label={label} className="flex gap-6">
     {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
       onClick={() => onChange(tab.id)}
       className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
       {tab.label}{tab.count !== undefined && <span className="text-xs text-muted">{tab.count.toLocaleString()}</span>}
     </button>)}
-  </div>;
+  </div>{actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}</div>;
 }
 
 // Bordered row list used for subjects, topics, resources, and dialog choices.

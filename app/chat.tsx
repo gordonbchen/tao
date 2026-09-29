@@ -94,7 +94,7 @@ export function Chat({ initialMessages = [], send, placeholder, empty, hint, sum
 }
 
 // A saved chat about a topic, folder, or resource: `path` is its chat endpoint. Remount it with a new `key` for each item.
-export function SavedChat({ path, name }: { path: string; name: string }) {
+export function SavedChat({ path, name, className }: { path: string; name: string; className?: string }) {
   const ai = useAISettings();
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [error, setError] = useState("");
@@ -116,6 +116,6 @@ export function SavedChat({ path, name }: { path: string; name: string }) {
 
   if (error) return <ErrorMessage>{error}</ErrorMessage>;
   if (!messages) return <p className="flex items-center gap-2 text-sm text-muted"><Spinner />Loading the chat…</p>;
-  return <Chat className="mx-auto h-[min(36rem,calc(100dvh-240px))] max-w-3xl" initialMessages={messages} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
+  return <Chat className={cn("h-[min(36rem,calc(100dvh-240px))]", className)} initialMessages={messages} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
     placeholder={`Ask about ${name}…`} empty="Ask a question, request an example, or ask to be quizzed. Answers draw on your course material." />;
 }
