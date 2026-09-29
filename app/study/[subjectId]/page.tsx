@@ -9,7 +9,7 @@ import { api, AppShell, LoadingCard, Subject } from "../../components";
 import { Button, ErrorMessage, Page, Tabs } from "../../ui";
 import { Cards } from "./cards";
 import { Problems } from "./problems";
-import { selectionLabel, SelectionDialog, type StudySelection } from "./selection";
+import { selectionLabel, SelectionDialog, selectionQuery, type StudySelection } from "./selection";
 
 type Mode = "problems" | "cards";
 const MODE_KEY = "tao-study-mode";
@@ -51,8 +51,8 @@ function StudyContent() {
     setMode(nextMode);
     setSelection(nextSelection);
     try { localStorage.setItem(MODE_KEY, nextMode); } catch {}
-    const search = new URLSearchParams([["mode", nextMode], ...nextSelection.topicIds.map((id) => ["topic", id]), ...nextSelection.groupIds.map((id) => ["group", id])]);
-    window.history.replaceState(null, "", `?${search}`);
+    const chosen = selectionQuery(nextSelection);
+    window.history.replaceState(null, "", `?mode=${nextMode}${chosen ? `&${chosen}` : ""}`);
   }
 
   const selectionKey = `${selection.topicIds.join(",")}|${selection.groupIds.join(",")}`;

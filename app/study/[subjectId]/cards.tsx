@@ -7,7 +7,7 @@ import { api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDelete, us
 import { Chat, type ChatMessage } from "../../chat";
 import { MathText } from "../../math-text";
 import { Badge, Button, Card, cn, ErrorMessage, IconButton, Input, Modal, Select, Spinner, Textarea } from "../../ui";
-import type { StudySelection } from "./selection";
+import { selectionQuery, type StudySelection } from "./selection";
 
 type Rating = 1 | 2 | 3 | 4;
 type ReviewCard = { id: string; topicId: string | null; topicName: string | null; front: string; back: string; intervals: Record<Rating, string>; messages: ChatMessage[] };
@@ -16,9 +16,6 @@ type StoredCard = { id: string; topicId: string | null; topicName: string | null
 type Draft = { front: string; back: string };
 type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit"; card: { id: string; topicId: string | null; front: string; back: string } };
 const ratingLabels: { value: Rating; label: string }[] = [{ value: 1, label: "Again" }, { value: 2, label: "Hard" }, { value: 3, label: "Good" }, { value: 4, label: "Easy" }];
-
-const selectionQuery = ({ topicIds, groupIds }: StudySelection) =>
-  new URLSearchParams([...topicIds.map((id) => ["topic", id]), ...groupIds.map((id) => ["group", id])]).toString();
 
 const jsonHeaders = () => ({ ...getAiRequestHeaders(), "Content-Type": "application/json" });
 

@@ -8,6 +8,10 @@ import { Button, Modal } from "../../ui";
 // Any mix of topics and folders; empty means every topic.
 export type StudySelection = { topicIds: string[]; groupIds: string[] };
 
+// The selection as the `topic` and `group` search parameters the study APIs read.
+export const selectionQuery = ({ topicIds, groupIds }: StudySelection) =>
+  new URLSearchParams([...topicIds.map((id) => ["topic", id]), ...groupIds.map((id) => ["group", id])]).toString();
+
 export function selectionLabel({ topicIds, groupIds }: StudySelection, topics: TreeTopic[], groups: TreeGroup[]) {
   const count = topicIds.length + groupIds.length;
   if (!count) return "All topics";

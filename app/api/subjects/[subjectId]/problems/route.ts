@@ -2,22 +2,17 @@ import { after } from "next/server";
 import { aiOptionsFromRequest, hasAiProvider } from "@/lib/ai";
 import { isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
-import { createProblem, findUnfinishedProblem, pickTopic, prepareReadyProblem, takeOrAwaitReadyProblem, topicReview } from "@/lib/practice";
+import { createProblem, findUnfinishedProblem, listProblems, pickTopic, prepareReadyProblem, takeOrAwaitReadyProblem, topicReview } from "@/lib/practice";
 import { shouldReuseDueProblem } from "@/lib/scheduler";
-import { selectionFromBody } from "@/lib/selection";
+import { selectionFromBody, selectionFromSearch } from "@/lib/selection";
 type RouteContext = { params: Promise<{ subjectId: string }> };
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
-  const limitValue = Number(new URL(request.url).searchParams.get("limit") || 20);
-  const limit = Math.max(1, Math.min(Number.isFinite(limitValue) ? Math.floor(limitValue) : 20, 50));
-  const result = await query(`SELECT p.id, p.topic_id AS "topicId", t.name AS "topicName", p.prompt,
-    p.difficulty, p.source_refs AS "sourceRefs", p.created_at AS "createdAt",
-    (SELECT count(*)::int FROM attempts a WHERE a.problem_id = p.id) AS "attemptCount"
-    FROM problems p LEFT JOIN topics t ON t.id = p.topic_id
-    WHERE p.subject_id = $1 AND p.served_at IS NOT NULL ORDER BY p.created_at DESC LIMIT $2`, [subjectId, limit]);
-  return Response.json({ problems: result.rows });
+  const selection = selectionFromSearch(new URL(request.url).searchParams);
+  if (typeof selection === "string") return jsonError(selection);
+  return Response.json({ problems: await listProblems(subjectId, selection) });
 }
 
 export async function POST(request: Request, { params }: RouteContext) {

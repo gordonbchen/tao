@@ -105,6 +105,20 @@ export async function findUnfinishedProblem(subjectId: string, selection: Select
   return { ...problem, messages: await chatMessages({ problemId: problem.id }) };
 }
 
+export type ProblemSummary = { id: string; topicName: string | null; prompt: string; difficulty: string; createdAt: Date; attempts: number; correctness: string | null; skipped: boolean };
+
+// Every problem the student has been shown in the selection, newest first, with its latest result.
+export async function listProblems(subjectId: string, selection: Selection) {
+  const result = await query<ProblemSummary>(`${selectionCte} SELECT p.id, t.name AS "topicName", p.prompt, p.difficulty, p.created_at AS "createdAt",
+      (SELECT count(*)::int FROM attempts a WHERE a.problem_id = p.id) AS attempts,
+      (SELECT a.correctness FROM attempts a WHERE a.problem_id = p.id ORDER BY a.created_at DESC LIMIT 1) AS correctness,
+      EXISTS (SELECT 1 FROM problem_feedback f WHERE f.problem_id = p.id AND f.skipped) AS skipped
+    FROM problems p LEFT JOIN topics t ON t.id = p.topic_id
+    WHERE p.subject_id = $2 AND p.served_at IS NOT NULL AND ${inSelection}
+    ORDER BY p.created_at DESC, p.id LIMIT 2000`, selectionParams(subjectId, selection));
+  return result.rows;
+}
+
 // The tutor conversation for a problem or a card, oldest first, in the shape the chat shows.
 export async function chatMessages({ problemId, cardId }: { problemId?: string; cardId?: string }) {
   const result = await query<{ role: "user" | "assistant"; text: string }>(`SELECT CASE WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role,
