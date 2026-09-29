@@ -195,7 +195,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         </div>
       </section>}
     </div>
-    <Chat key={problem.id} className="lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
+    <Chat key={problem.id} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
   </div>{browseDialog}</>;
 }
 

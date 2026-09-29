@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
@@ -55,11 +55,11 @@ function SubjectContent() {
   const suggestions = suggestionQueue[0] ?? null;
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
-  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted">("summary");
+  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted" | "chat">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
-  const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
+  const [topicTab, setTopicTab] = useState<"summary" | "resources" | "chat">("summary");
   const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
-  const [groupTab, setGroupTab] = useState<"summary" | "resources">("summary");
+  const [groupTab, setGroupTab] = useState<"summary" | "resources" | "chat">("summary");
   const [summarizingGroupIds, setSummarizingGroupIds] = useState<string[]>([]);
   const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
   const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
@@ -101,6 +101,10 @@ function SubjectContent() {
   const [chatOpen, toggleChat] = useStoredToggle("tao-viewer-chat", true);
   const [subjectChatOpen, toggleSubjectChat] = useStoredToggle("tao-subject-chat", false);
   const chatToggle = <ChatToggle open={chatOpen} onToggle={toggleChat} />;
+  // Wide screens show a viewer's chat beside its summary; narrow ones give it its own tab.
+  const wide = useMediaQuery("(min-width: 64rem)");
+  const chatTab = wide ? [] : [{ id: "chat" as const, label: "Chat" }];
+  const viewerChat = (path: string, id: string, name: string) => <SavedChat key={id} path={path} name={name} className={wide ? splitChat : "h-[calc(100dvh-10rem)]"} />;
   function flash(itemId: string) {
     setHighlightId(itemId);
     setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
@@ -565,9 +569,9 @@ function SubjectContent() {
       if (event.key === "Tab") {
         event.preventDefault();
         const step = event.shiftKey ? -1 : 1;
-        if (resourceText) setResourceTab((tab) => cycle(resourceTabs, tab, step));
-        else if (groupDetail) setGroupTab((tab) => cycle(topicTabs, tab, step));
-        else setTopicTab((tab) => cycle(topicTabs, tab, step));
+        if (resourceText) setResourceTab((tab) => cycle([...resourceTabs, ...chatTab.map((item) => item.id)], tab, step));
+        else if (groupDetail) setGroupTab((tab) => cycle([...topicTabs, ...chatTab.map((item) => item.id)], tab, step));
+        else setTopicTab((tab) => cycle([...topicTabs, ...chatTab.map((item) => item.id)], tab, step));
       } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
         const step = event.key === "ArrowRight" ? 1 : -1;
@@ -612,13 +616,13 @@ function SubjectContent() {
         {error && <ErrorMessage>{error}</ErrorMessage>}
       </div>
 
-      {/* Below the title on narrow screens; beside everything, and in view while the page scrolls, on wide ones. */}
-      {subjectChat && <div className="mb-12 self-start lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mb-0">
-        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} className="lg:h-[min(40rem,calc(100dvh-14rem))]"
+      {/* In place of topics and resources on narrow screens; beside them, and in view while the page scrolls, on wide ones. */}
+      {subjectChat && <div className="self-start max-lg:w-full lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} className="max-lg:h-[calc(100dvh-18rem)] lg:h-[min(40rem,calc(100dvh-14rem))]"
           empty="Ask about your progress, weakest topics, or what to study next, or about the course material." />
       </div>}
 
-      <div>
+      <div className={cn(subjectChat && "max-lg:hidden")}>
         <section className="mb-12">
           <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
             <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
@@ -656,8 +660,9 @@ function SubjectContent() {
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
-      <Tabs label="Resource content" actions={resourceTab === "summary" && chatToggle} value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
-      {resourceTab === "summary" ? <WithChat open={chatOpen} chat={<SavedChat key={resourceText.id} path={`/api/resources/${resourceText.id}/chat`} name={resourceText.filename} className={splitChat} />}><section role="tabpanel" aria-label="Model summary">
+      <Tabs label="Resource content" actions={wide && (resourceTab === "summary" || resourceTab === "chat") && chatToggle} value={wide && resourceTab === "chat" ? "summary" : resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }, ...chatTab]} />
+      {!wide && resourceTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}</section>
+      : resourceTab === "summary" || resourceTab === "chat" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}><section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
           <MarkdownMathText text={resourceText.modelSummary} />
@@ -676,9 +681,10 @@ function SubjectContent() {
 
     {groupDetail && <Modal wide title={groupDetail.name} label={`Folder summary for ${groupDetail.name}`} onClose={() => setGroupDetail(null)}
       subtitle={[...groupPath(groups, groupDetail.parentId), `${groupDetail.topicCount} topic${groupDetail.topicCount === 1 ? "" : "s"}`].join(" › ")}>
-      <Tabs label="Folder content" actions={groupTab === "summary" && chatToggle} value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }]} />
+      <Tabs label="Folder content" actions={wide && (groupTab === "summary" || groupTab === "chat") && chatToggle} value={wide && groupTab === "chat" ? "summary" : groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }, ...chatTab]} />
       {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
-      {groupTab === "summary" ? <WithChat open={chatOpen} chat={<SavedChat key={groupDetail.id} path={`/api/groups/${groupDetail.id}/chat`} name={groupDetail.name} className={splitChat} />}><section role="tabpanel" aria-label="Folder summary">
+      {!wide && groupTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}</section>
+      : groupTab === "summary" || groupTab === "chat" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}><section role="tabpanel" aria-label="Folder summary">
         {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
           {groupDetail.summaryStatus === "stale" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">This folder&apos;s contents changed. Refresh the summary to reflect them.</p>}
           <MarkdownMathText text={groupDetail.summary} />
@@ -710,9 +716,10 @@ function SubjectContent() {
     </Modal>}
 
     {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
-      <Tabs label="Topic content" actions={topicTab === "summary" && chatToggle} value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }]} />
+      <Tabs label="Topic content" actions={wide && (topicTab === "summary" || topicTab === "chat") && chatToggle} value={wide && topicTab === "chat" ? "summary" : topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, ...chatTab]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
-      {topicTab === "summary" ? <WithChat open={chatOpen} chat={<SavedChat key={topicDetail.id} path={`/api/topics/${topicDetail.id}/chat`} name={topicDetail.name} className={splitChat} />}><section role="tabpanel" aria-label="Topic coverage summary">
+      {!wide && topicTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}</section>
+      : topicTab === "summary" || topicTab === "chat" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}><section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
           {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
@@ -753,6 +760,15 @@ function useStoredToggle(key: string, initial: boolean) {
     return !current;
   });
   return [value, toggle] as const;
+}
+
+// Whether `query` matches, following changes; true before hydration so the server renders the wide layout.
+function useMediaQuery(query: string) {
+  return useSyncExternalStore((onChange) => {
+    const media = window.matchMedia(query);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, () => window.matchMedia(query).matches, () => true);
 }
 
 function ChatToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {

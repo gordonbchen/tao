@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { KeyRound, Moon, Sun } from "lucide-react";
+import { KeyRound, Menu, Moon, Sun, X } from "lucide-react";
 import { Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Select, Spinner } from "./ui";
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number; diagrams?: boolean };
@@ -96,8 +96,8 @@ function UndoToast() {
     return () => { undoListeners.delete(setState); };
   }, []);
   if (!state) return null;
-  return <div role="status" className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-line bg-surface py-2 pr-2 pl-4 text-sm shadow-float">
-    <span>{state.message}</span><Button size="sm" onClick={state.undo}>Undo</Button>
+  return <div role="status" className="fixed bottom-6 left-1/2 z-30 flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-4 rounded-lg border border-line bg-surface py-2 pr-2 pl-4 text-sm shadow-float">
+    <span className="min-w-0 truncate">{state.message}</span><Button size="sm" onClick={state.undo}>Undo</Button>
   </div>;
 }
 
@@ -107,6 +107,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [model, setModelState] = useState("gpt-6-luna");
   const [usage, setUsage] = useState<AIUsage>(emptyUsage);
   const [accountsOpen, setAccountsOpen] = useState(false);
+  // The site controls fold into a menu on narrow screens.
+  const [menuOpen, setMenuOpen] = useState(false);
   const loadStatus = useCallback(async () => {
     try {
       const data = await fetch("/api/ai/status").then(r => r.json()) as AIStatus;
@@ -147,22 +149,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     localStorage.setItem("tao-theme", next);
   }
   const usageLabel = usage.remainingPercent === null ? `${provider} allowance is unavailable` : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`;
+  const modelSelect = (className: string) => <Select className={className} aria-label="AI model" title={`Select ${provider} model`} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.provider} · {option.id}</option>)}</Select>;
+  const usageBar = <div className="flex min-w-0 items-center gap-2 text-xs text-muted" title={usageLabel} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
+    <span className="max-md:hidden max-sm:inline">Usage remaining</span>
+    <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-line-strong max-sm:flex-1"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
+    <strong className="font-semibold text-ink">{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
+  </div>;
+  const themeLabel = theme === "dark" ? "Use light mode" : "Use dark mode";
+  const ThemeIcon = theme === "dark" ? Sun : Moon;
   return <div className="min-h-dvh">
-    <header className="border-b border-line bg-paper"><div className="flex h-16 w-full items-center justify-between gap-4 px-6 max-sm:gap-2 max-sm:px-4">
-      <Link className="inline-flex flex-none items-center gap-2 text-lg font-semibold" href="/"><Image className="dark:invert" src="/icon.svg" alt="" width={30} height={30} /><span className="max-sm:hidden">Tao</span></Link>
-      <nav className="flex min-w-0 items-center gap-2 max-sm:gap-1" aria-label="Site controls">
+    <header className="border-b border-line bg-paper"><div className="flex h-16 w-full items-center justify-between gap-4 px-6 max-sm:px-4">
+      <Link className="inline-flex flex-none items-center gap-2 text-lg font-semibold" href="/"><Image className="dark:invert" src="/icon.svg" alt="" width={30} height={30} />Tao</Link>
+      <nav className="flex min-w-0 items-center gap-2 max-sm:hidden" aria-label="Site controls">
         {status.available ? <>
-          <Select className="min-w-0 max-w-64 max-sm:max-w-32" aria-label="AI model" title={`Select ${provider} model`} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.provider} · {option.id}</option>)}</Select>
-          <div className="flex min-w-0 items-center gap-2 px-2 text-xs text-muted" title={usageLabel} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
-            <span className="max-md:hidden">Usage remaining</span>
-            <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-line-strong"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
-            <strong className="font-semibold text-ink">{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
-          </div>
+          {modelSelect("min-w-0 max-w-64")}
+          <div className="px-2">{usageBar}</div>
           <IconButton label="AI accounts" onClick={() => setAccountsOpen(true)}><KeyRound size={20} /></IconButton>
         </> : <Button onClick={() => setAccountsOpen(true)}><KeyRound size={18} />Connect AI</Button>}
-        <IconButton label={theme === "dark" ? "Use light mode" : "Use dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}</IconButton>
+        <IconButton label={themeLabel} onClick={toggleTheme}><ThemeIcon size={20} /></IconButton>
       </nav>
-    </div></header>
+      <IconButton className="sm:hidden" label={menuOpen ? "Close menu" : "Menu"} aria-expanded={menuOpen} aria-controls="site-menu" onClick={() => setMenuOpen(open => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</IconButton>
+    </div>
+    {menuOpen && <nav id="site-menu" className="flex flex-col gap-3 border-t border-line px-4 py-4 sm:hidden" aria-label="Site controls">
+      {status.available && <>{modelSelect("w-full")}{usageBar}</>}
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => { setMenuOpen(false); setAccountsOpen(true); }}><KeyRound size={18} />{status.available ? "AI accounts" : "Connect AI"}</Button>
+        <Button onClick={toggleTheme}><ThemeIcon size={18} />{themeLabel}</Button>
+      </div>
+    </nav>}
+    </header>
     {children}{accountsOpen && <AIAccounts providers={status.providers} refresh={loadStatus} close={() => setAccountsOpen(false)} />}<UndoToast />
   </div>;
 }

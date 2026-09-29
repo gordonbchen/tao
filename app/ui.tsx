@@ -84,13 +84,14 @@ export function Modal({ title, label, subtitle, onClose, wide, children }: Modal
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-  return <div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+  // Wide dialogs fill a narrow screen instead of floating in it.
+  return <div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden max-sm:p-0" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div role="dialog" aria-modal="true" aria-label={label ?? (typeof title === "string" ? title : undefined)} className={cn(
       "w-full overflow-auto rounded-lg border border-line bg-paper p-6 shadow-float max-sm:p-4",
-      wide ? "max-h-[calc(100dvh-40px)] max-w-7xl" : "max-h-[90vh] max-w-lg",
+      wide ? "max-h-[calc(100dvh-40px)] max-w-7xl max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none max-sm:border-0" : "max-h-[90vh] max-w-lg",
     )}>
       <div className="mb-6 flex items-center justify-between gap-4">
-        <div className="min-w-0"><h2 className="text-xl font-semibold">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
+        <div className="min-w-0"><h2 className="text-xl font-semibold break-words">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
         <IconButton label="Close" onClick={onClose}><X size={20} /></IconButton>
       </div>
       {children}
@@ -151,11 +152,11 @@ type Tab<T extends string> = { id: T; label: string; count?: number };
 // Underlined tab list. Pages that use it own its keyboard shortcuts.
 // `actions` sit at the right end of the tab row.
 export function Tabs<T extends string>({ tabs, value, onChange, label, actions, className }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string; actions?: ReactNode; className?: string }) {
-  return <div className={cn("-mt-2 mb-4 flex items-center gap-6 border-b border-line", className)}><div role="tablist" aria-label={label} className="flex gap-6">
+  return <div className={cn("-mt-2 mb-4 flex items-center gap-6 border-b border-line max-sm:gap-4", className)}><div role="tablist" aria-label={label} className="flex min-w-0 gap-6 max-sm:gap-4">
     {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
       onClick={() => onChange(tab.id)}
-      className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
-      {tab.label}{tab.count !== undefined && <span className="text-xs text-muted">{tab.count.toLocaleString()}</span>}
+      className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 whitespace-nowrap px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
+      {tab.label}{tab.count !== undefined && <span className="text-xs text-muted max-sm:hidden">{tab.count.toLocaleString()}</span>}
     </button>)}
   </div>{actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}</div>;
 }
