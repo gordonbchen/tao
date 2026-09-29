@@ -107,7 +107,7 @@ export async function findUnfinishedProblem(subjectId: string, selection: Select
     ORDER BY p.served_at DESC LIMIT 1`, selectionParams(subjectId, selection));
   const problem = result.rows[0];
   if (!problem) return null;
-  return { ...problem, messages: await chatMessages({ problemId: problem.id }) };
+  return { ...problem, messages: await chatMessages("problem_id", problem.id) };
 }
 
 export type ProblemSummary = { id: string; topicName: string | null; prompt: string; difficulty: string; createdAt: Date; attempts: number; correctness: string | null; skipped: boolean };
@@ -124,10 +124,11 @@ export async function listProblems(subjectId: string, selection: Selection) {
   return result.rows;
 }
 
-// The tutor conversation for a problem or a card, oldest first, in the shape the chat shows.
-export async function chatMessages({ problemId, cardId }: { problemId?: string; cardId?: string }) {
-  const result = await query<{ role: "user" | "assistant"; text: string }>(`SELECT CASE WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role,
-    content AS text FROM tutor_messages WHERE (problem_id = $1 OR card_id = $2) AND kind IN ('question', 'hint') ORDER BY created_at`, [problemId ?? null, cardId ?? null]);
+// The tutor conversation for a problem, card, topic, folder, or resource, oldest first, in the shape the chat shows.
+// A question and its reply share a timestamp, so the student row ('student' < 'tutor') sorts first.
+export async function chatMessages(parent: "problem_id" | "card_id" | "topic_id" | "group_id" | "resource_id", id: string) {
+  const result = await query<{ role: "user" | "assistant" | "summary"; text: string }>(`SELECT CASE WHEN kind = 'summary' THEN 'summary' WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role,
+    content AS text FROM tutor_messages WHERE ${parent} = $1 AND kind IN ('question', 'hint', 'summary') ORDER BY created_at, tutor_messages.role`, [id]);
   return result.rows;
 }
 

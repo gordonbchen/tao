@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     FROM attempts WHERE problem_id = $1 ORDER BY created_at DESC LIMIT 1`, [problemId]);
   const latest = attempt.rows[0];
   return Response.json({
-    problem: { ...problem, messages: await chatMessages({ problemId }) },
+    problem: { ...problem, messages: await chatMessages("problem_id", problemId) },
     attempt: latest ? { ...latest, solution, solutionDiagram } : null,
   });
 }

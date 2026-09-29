@@ -7,6 +7,7 @@ import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, Plus, Sparkles, Trash
 import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
+import { SavedChat } from "../../chat";
 import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
 import { TopicTree, type Group, type Topic, type TreeActions } from "./topic-tree";
 
@@ -54,11 +55,11 @@ function SubjectContent() {
   const suggestions = suggestionQueue[0] ?? null;
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
-  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted">("summary");
+  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted" | "chat">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
-  const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
+  const [topicTab, setTopicTab] = useState<"summary" | "resources" | "chat">("summary");
   const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
-  const [groupTab, setGroupTab] = useState<"summary" | "resources">("summary");
+  const [groupTab, setGroupTab] = useState<"summary" | "resources" | "chat">("summary");
   const [summarizingGroupIds, setSummarizingGroupIds] = useState<string[]>([]);
   const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
   const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
@@ -639,7 +640,7 @@ function SubjectContent() {
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
-      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
+      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }, { id: "chat", label: "Chat" }]} />
       {resourceTab === "summary" ? <section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
@@ -654,12 +655,13 @@ function SubjectContent() {
           selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
           suggestions={linkSuggestions[`resource:${resourceText.id}`]} onSuggest={() => loadLinkSuggestions(`resource:${resourceText.id}`, `/api/resources/${resourceText.id}/suggested-topics`)}
           saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
-      </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
+      </section> : resourceTab === "extracted" ? <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>
+      : <section role="tabpanel" aria-label="Chat about this resource"><SavedChat key={resourceText.id} path={`/api/resources/${resourceText.id}/chat`} name={resourceText.filename} /></section>}
     </Modal>}
 
     {groupDetail && <Modal wide title={groupDetail.name} label={`Folder summary for ${groupDetail.name}`} onClose={() => setGroupDetail(null)}
       subtitle={[...groupPath(groups, groupDetail.parentId), `${groupDetail.topicCount} topic${groupDetail.topicCount === 1 ? "" : "s"}`].join(" › ")}>
-      <Tabs label="Folder content" value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }]} />
+      <Tabs label="Folder content" value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
       {groupTab === "summary" ? <section role="tabpanel" aria-label="Folder summary">
         {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
@@ -670,7 +672,8 @@ function SubjectContent() {
           <p className="text-muted">{groupDetail.topicCount ? "A short overview of the topics and folders inside." : "Add topics to this folder to summarize it."}</p>
           {groupDetail.topicCount > 0 && <Button variant="primary" onClick={() => void generateGroupSummary(groupDetail.id)}>Create summary</Button>}
         </div>}
-      </section> : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
+      </section> : groupTab === "chat" ? <section role="tabpanel" aria-label="Chat about this folder"><SavedChat key={groupDetail.id} path={`/api/groups/${groupDetail.id}/chat`} name={groupDetail.name} /></section>
+      : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
         {groupDetail.resources.length ? <List>{groupDetail.resources.map((resource) => <ListItem key={resource.id}>
           <button type="button" className={rowTitle} onClick={() => { const item = resources.find((candidate) => candidate.id === resource.id); if (item) void showResourceText(item); }}><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button>
         </ListItem>)}</List> : <p className="text-muted">No resources are linked to topics in this folder.</p>}
@@ -693,7 +696,7 @@ function SubjectContent() {
     </Modal>}
 
     {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
-      <Tabs label="Topic content" value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }]} />
+      <Tabs label="Topic content" value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
       {topicTab === "summary" ? <section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
@@ -701,7 +704,8 @@ function SubjectContent() {
           {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
         </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
-      </section> : <section role="tabpanel" aria-label="Resources linked to topic">
+      </section> : topicTab === "chat" ? <section role="tabpanel" aria-label="Chat about this topic"><SavedChat key={topicDetail.id} path={`/api/topics/${topicDetail.id}/chat`} name={topicDetail.name} /></section>
+      : <section role="tabpanel" aria-label="Resources linked to topic">
         <LinkPicker noun="resource" target="topic" icon={FileText} items={resources.map((resource) => ({ id: resource.id, name: resource.filename }))} saved={topicDetail.resources.map((resource) => resource.id)}
           selected={selectedTopicResources} onSelectedChange={setSelectedTopicResources} search={resourceSearch} onSearchChange={setResourceSearch}
           suggestions={linkSuggestions[`topic:${topicDetail.id}`]} onSuggest={() => loadLinkSuggestions(`topic:${topicDetail.id}`, `/api/topics/${topicDetail.id}/suggested-resources`)}
@@ -712,8 +716,8 @@ function SubjectContent() {
   </Page>;
 }
 
-const resourceTabs = ["summary", "topics", "extracted"] as const;
-const topicTabs = ["summary", "resources"] as const;
+const resourceTabs = ["summary", "topics", "extracted", "chat"] as const;
+const topicTabs = ["summary", "resources", "chat"] as const;
 
 // Returns the item `step` places from `current`, wrapping around; `current` itself if it is not in the list.
 function cycle<T>(items: readonly T[], current: T, step: number) {

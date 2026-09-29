@@ -136,6 +136,23 @@ export async function tutorCard(card: { front: string; back: string }, revealed:
   return typeof value.hint === "string" ? value.hint.slice(0, 2000) : undefined;
 }
 
+// One reply in an open conversation about a topic, folder, or resource, grounded in the supplied material.
+// `earlierSummary` stands in for the conversation before `conversation`.
+export async function chatAbout(material: object, earlierSummary: string | undefined, conversation: { role: string; text: string }[], studentMessage: string, options: AiOptions = {}) {
+  const { value } = await jsonFromConfiguredProvider<{ hint: string }>(
+    `Act as a knowledgeable, friendly tutor talking with a student about part of their course. The material is what their course covers; base answers on it, and say so when you go beyond it or when it does not cover the question. Explain, give examples or intuition, compare ideas, or quiz the student when asked. Keep replies short unless the student asks for more. Return JSON with a single hint string containing your reply. ${PLAIN_MATH_TEXT}`,
+    JSON.stringify({ material, earlierSummary, conversation, studentMessage }), "hint", options);
+  return typeof value.hint === "string" ? value.hint.slice(0, 4000) : undefined;
+}
+
+// Condenses a study chat so it can continue from the summary instead of the full history.
+export async function summarizeChat(earlierSummary: string | undefined, conversation: { role: string; text: string }[], options: AiOptions = {}) {
+  const { value } = await jsonFromConfiguredProvider<{ hint: string }>(
+    `Summarize a conversation between a student and a tutor so the tutor can continue it from the summary alone. Include an earlier summary if one is given. Keep what the student asked, what was explained and any examples or quiz questions, what the student understood or got wrong, and anything left open. Use at most 250 words. Return JSON with a single hint string containing the summary. ${PLAIN_MATH_TEXT}`,
+    JSON.stringify({ earlierSummary, conversation }), "hint", options);
+  return typeof value.hint === "string" ? value.hint.slice(0, 4000) : undefined;
+}
+
 export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "group_summary" | "topic_placements" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
   return jsonFromConfiguredProvider<unknown>(system, input, kind, options);
 }
