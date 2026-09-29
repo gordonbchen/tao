@@ -306,7 +306,7 @@ function ImportDialog({ subjectId, topics, groups, topicId: initialTopicId, onCl
 
 function GenerateDialog({ subjectId, topics, groups, topicId: initialTopicId, onClose }: { subjectId: string; topics: TreeTopic[]; groups: TreeGroup[]; topicId?: string; onClose: (changed: boolean) => void }) {
   const [topicId, setTopicId] = useState<string | null>(initialTopicId ?? null);
-  const [count, setCount] = useState(10);
+  const [count, setCount] = useState<number | "auto">("auto");
   const [result, setResult] = useState<{ cards: Draft[]; metadata: object } | null>(null);
   const [kept, setKept] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -332,14 +332,17 @@ function GenerateDialog({ subjectId, topics, groups, topicId: initialTopicId, on
   return <Modal title="Generate cards" subtitle={result ? "Uncheck any card you don’t want to keep." : "From the topic’s coverage summary and linked resources."} onClose={() => onClose(false)} wide={Boolean(result)}>
     {!result ? <div className="flex flex-col gap-4">
       <Field label="Topic"><TopicSelect topics={topics} groups={groups} value={topicId} onChange={setTopicId} /></Field>
-      <Field label="How many"><Select value={count} onChange={(event) => setCount(Number(event.target.value))}>{[5, 10, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}</Select></Field>
+      <Field label="How many"><Select value={count} onChange={(event) => setCount(event.target.value === "auto" ? "auto" : Number(event.target.value))}>
+        <option value="auto">Auto: as many as the material needs</option>
+        {[5, 10, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}
+      </Select></Field>
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
         <Button onClick={() => onClose(false)}>Cancel</Button>
         <Button variant="primary" disabled={!topicId || busy} onClick={() => void generate()}>{busy ? <><Spinner />Writing cards…</> : "Generate"}</Button>
       </div>
     </div> : <div className="flex flex-col gap-4">
-      <DraftList drafts={result.cards} kept={kept} onToggle={(index) => setKept((current) => { const next = new Set(current); if (!next.delete(index)) next.add(index); return next; })} />
+      {!result.cards.length ? <p className="text-muted">Your existing cards already cover this topic.</p> : <DraftList drafts={result.cards} kept={kept} onToggle={(index) => setKept((current) => { const next = new Set(current); if (!next.delete(index)) next.add(index); return next; })} />}
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
         <Button onClick={() => setResult(null)} disabled={busy}>Back</Button>
