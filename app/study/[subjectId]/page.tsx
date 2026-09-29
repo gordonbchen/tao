@@ -60,9 +60,10 @@ function StudyContent() {
   return <Page className="max-w-6xl pt-8">
     <Link href={`/subjects/${subjectId}`} className="mb-6 inline-flex items-center gap-2 text-sm text-muted underline-offset-4 hover:text-ink hover:underline"><ArrowLeft size={18} />{subject?.name || "Subject"}</Link>
     {error ? <ErrorMessage>{error}</ErrorMessage> : !subject || !mode ? <LoadingCard /> : <>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 border-b border-line">
-        <Tabs className="m-0 border-0" label="Study mode" value={mode} onChange={(id) => update({ mode: id })} tabs={[{ id: "problems", label: "Problems" }, { id: "cards", label: "Flashcards" }]} />
-        <Button variant="ghost" className="-mr-4 max-w-full" onClick={() => setChoosing(true)} title="Choose topics and folders to study together">
+      {/* One row that never wraps, so the active tab's underline stays on the border; the selection shrinks and truncates instead. */}
+      <div className="mb-6 flex items-center gap-4 border-b border-line">
+        <Tabs className="m-0 flex-none border-0" label="Study mode" value={mode} onChange={(id) => update({ mode: id })} tabs={[{ id: "problems", label: "Problems" }, { id: "cards", label: "Flashcards" }]} />
+        <Button variant="ghost" className="ml-auto min-w-0" onClick={() => setChoosing(true)} title="Choose topics and folders to study together">
           <span className="truncate">{selectionLabel(selection, topics, groups)}</span><ChevronDown size={16} className="flex-none" />
         </Button>
       </div>

@@ -127,7 +127,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     <div className="flex min-w-0 flex-col gap-4">
       <Card className="p-6 max-sm:p-4">
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <Badge>{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</Badge>
+          <Badge title={topics.find(t => t.id === problem.topicId)?.name}>{topics.find(t => t.id === problem.topicId)?.name || "Your course"}</Badge>
           {problem.isReview && <Badge tone="neutral">Review again</Badge>}
           <Badge tone="neutral">{problem.difficulty === "easy" ? "Easy" : problem.difficulty === "hard" ? "Hard" : "Medium"}</Badge>
           <Button size="sm" variant="ghost" className="ml-auto text-muted" onClick={() => openProblemFeedback(feedback ? "feedback" : "skip")} disabled={working || feedbackMode !== null}>{feedback ? "Give feedback" : "Skip"}</Button>

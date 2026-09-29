@@ -52,8 +52,9 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
 
 const badgeTones = { accent: "bg-accent-soft text-accent", neutral: "bg-subtle text-muted", danger: "bg-danger-soft text-danger" };
 
-export function Badge({ tone = "accent", className, ...props }: ComponentProps<"span"> & { tone?: keyof typeof badgeTones }) {
-  return <span className={cn("inline-flex flex-none items-center gap-1 rounded-full px-2 py-1 text-xs", badgeTones[tone], className)} {...props} />;
+// Never wider than its container: long text, such as a topic name, is truncated.
+export function Badge({ tone = "accent", className, children, ...props }: ComponentProps<"span"> & { tone?: keyof typeof badgeTones }) {
+  return <span className={cn("inline-flex max-w-full min-w-0 flex-none items-center gap-1 rounded-full px-2 py-1 text-xs", badgeTones[tone], className)} {...props}><span className="truncate">{children}</span></span>;
 }
 
 export function Spinner({ className }: { className?: string }) {

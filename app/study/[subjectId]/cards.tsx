@@ -120,7 +120,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
         <div className="flex min-w-0 flex-col gap-4">
           <Card className="p-6 max-sm:p-4">
             <div className="mb-4 flex items-center gap-2">
-              {card.topicName && <Badge>{card.topicName}</Badge>}
+              {card.topicName && <Badge className="flex-initial" title={card.topicName}>{card.topicName}</Badge>}
               <IconButton size="sm" className="ml-auto" label="Edit card" onClick={() => setDialog({ kind: "edit", card })}><Pencil size={16} /></IconButton>
             </div>
             <MathText className="text-lg leading-relaxed whitespace-pre-wrap" text={card.front} />

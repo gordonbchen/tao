@@ -34,7 +34,7 @@ export function SelectionDialog({ value, topics, groups, onApply, onClose }: {
   });
 
   return <Modal title="Choose topics" onClose={onClose}>
-    <ul className="-mx-2 max-h-[60vh] overflow-auto">
+    <ul className="max-h-[60vh] overflow-auto">
       {rows.map((row) => {
         const isGroup = row.kind === "group";
         const id = isGroup ? row.group.id : row.topic.id;
