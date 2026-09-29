@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { recentMessages, relevantPassages, sinceSummary } from "../lib/chat-context.ts";
+import { mentionedItems, recentMessages, relevantPassages, sinceSummary } from "../lib/chat-context.ts";
 
 test("short text is sent whole", () => {
   assert.equal(relevantPassages("Short notes on groups.", "anything"), "Short notes on groups.");
@@ -27,4 +27,10 @@ test("a chat summary stands in for the messages before it", () => {
   const chat = [{ role: "user", text: "q1" }, { role: "summary", text: "s1" }, { role: "user", text: "q2" }, { role: "summary", text: "s2" }, { role: "user", text: "q3" }, { role: "assistant", text: "a3" }];
   assert.deepEqual(sinceSummary(chat), { summary: "s2", messages: chat.slice(4) });
   assert.deepEqual(sinceSummary(chat.slice(0, 1)), { summary: undefined, messages: chat.slice(0, 1) });
+});
+
+test("topics named in the conversation are found, best match first", () => {
+  const topics = [{ name: "Sylow theorems" }, { name: "Lagrange's theorem" }, { name: "Group actions" }, { name: "Rings" }];
+  assert.deepEqual(mentionedItems(topics, "Can you quiz me on group actions and the Sylow theorems?", 2).map((topic) => topic.name), ["Sylow theorems", "Group actions"]);
+  assert.deepEqual(mentionedItems(topics, "What is my weakest area?", 2), []);
 });

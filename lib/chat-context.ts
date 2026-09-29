@@ -31,3 +31,12 @@ export function sinceSummary<T extends { role: string; text: string }>(messages:
   const last = messages.findLastIndex((message) => message.role === "summary");
   return { summary: last < 0 ? undefined : messages[last].text, messages: messages.slice(last + 1) };
 }
+
+const words = (text: string) => new Set(text.toLowerCase().match(/\p{L}[\p{L}\p{N}]{3,}/gu) ?? []);
+
+// The items whose names share the most words with the conversation, best first; none when nothing matches.
+export function mentionedItems<T extends { name: string }>(items: T[], question: string, limit: number) {
+  const asked = words(question);
+  return items.map((item) => ({ item, score: [...words(item.name)].filter((word) => asked.has(word)).length }))
+    .filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score).slice(0, limit).map((entry) => entry.item);
+}

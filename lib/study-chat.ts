@@ -2,15 +2,17 @@ import { aiOptionsFromRequest, chatAbout, hasAiProvider, summarizeChat } from "@
 import { isUuid, jsonError, LOCAL_OWNER_ID, query } from "@/lib/db";
 import { recentMessages, relevantPassages, sinceSummary } from "@/lib/chat-context";
 import { chatMessages, topicExcerpts } from "@/lib/practice";
+import { subjectMaterial } from "@/lib/subject-context";
 import { getOwnedGroup, groupSummaryInput } from "@/lib/topic-groups";
 
-// A chat about a topic, folder, or resource, outside practice. Messages are stored in tutor_messages.
-export type ChatTarget = "topic" | "group" | "resource";
-const parents = { topic: "topic_id", group: "group_id", resource: "resource_id" } as const;
-const notFound = { topic: "Topic not found", group: "Folder not found", resource: "Resource not found" };
+// A chat about a subject, topic, folder, or resource, outside practice. Messages are stored in tutor_messages.
+export type ChatTarget = "subject" | "topic" | "group" | "resource";
+const parents = { subject: "subject_id", topic: "topic_id", group: "group_id", resource: "resource_id" } as const;
+const notFound = { subject: "Subject not found", topic: "Topic not found", group: "Folder not found", resource: "Resource not found" };
 
 // The material the tutor reads, or null when the item does not exist or belongs to someone else.
 async function material(target: ChatTarget, id: string, question: string) {
+  if (target === "subject") return subjectMaterial(id, question);
   if (target === "topic") {
     const result = await query<{ id: string; subjectId: string; subject: string; name: string; coverageSummary: string }>(`SELECT t.id, t.subject_id AS "subjectId",
       s.name AS subject, t.name, t.coverage_summary AS "coverageSummary" FROM topics t JOIN subjects s ON s.id = t.subject_id WHERE t.id = $1 AND s.owner_id = $2`, [id, LOCAL_OWNER_ID]);
@@ -37,6 +39,7 @@ async function material(target: ChatTarget, id: string, question: string) {
 
 async function owned(target: ChatTarget, id: string) {
   const sql = {
+    subject: "SELECT 1 FROM subjects WHERE id = $1 AND owner_id = $2",
     topic: "SELECT 1 FROM topics t JOIN subjects s ON s.id = t.subject_id WHERE t.id = $1 AND s.owner_id = $2",
     group: "SELECT 1 FROM topic_groups g JOIN subjects s ON s.id = g.subject_id WHERE g.id = $1 AND s.owner_id = $2",
     resource: "SELECT 1 FROM resources WHERE id = $1 AND owner_id = $2",

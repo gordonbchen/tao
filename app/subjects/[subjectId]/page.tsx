@@ -8,7 +8,7 @@ import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, sibl
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { SavedChat } from "../../chat";
-import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
+import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
 import { TopicTree, type Group, type Topic, type TreeActions } from "./topic-tree";
 
 type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: Placement[] };
@@ -97,18 +97,10 @@ function SubjectContent() {
       return next;
     });
   }
-  // Whether viewers show the chat beside the summary; a per-browser preference.
-  const [chatOpen, setChatOpen] = useState(true);
-  useEffect(() => {
-    try { setChatOpen(localStorage.getItem(chatOpenKey) !== "false"); } catch { /* Show it. */ }
-  }, []);
-  function toggleChat() {
-    setChatOpen((open) => {
-      try { localStorage.setItem(chatOpenKey, String(!open)); } catch { /* Keep it for this visit only. */ }
-      return !open;
-    });
-  }
-  const chatToggle = <IconButton label={chatOpen ? "Hide chat" : "Show chat"} aria-pressed={chatOpen} className="aria-pressed:text-accent" onClick={toggleChat}><MessageSquare size={18} /></IconButton>;
+  // Whether viewers show the chat beside the summary, and whether the subject chat is open; per-browser preferences.
+  const [chatOpen, toggleChat] = useStoredToggle("tao-viewer-chat", true);
+  const [subjectChatOpen, toggleSubjectChat] = useStoredToggle("tao-subject-chat", false);
+  const chatToggle = <ChatToggle open={chatOpen} onToggle={toggleChat} />;
   function flash(itemId: string) {
     setHighlightId(itemId);
     setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
@@ -602,38 +594,50 @@ function SubjectContent() {
   const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
   const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
 
-  return <Page>
+  const subjectChat = subjectChatOpen && !loading && !!subject;
+  return <Page className={subjectChat ? "max-w-7xl" : undefined}>
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
-    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
-      <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
-        <div className="flex flex-wrap items-center gap-4">
-          <label className="flex h-control cursor-pointer items-center gap-2 text-sm" title="Ask the AI to draw a figure when one helps. It applies to problems and cards written from now on.">
-            <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => void setDiagrams(event.target.checked)} />
-            Generate diagrams
-          </label>
-          <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
-        </div>
-      </div>
-      {error && <ErrorMessage>{error}</ErrorMessage>}
-
-      <section className="mb-12">
-        <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
-          <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
-            {topics.length > 1 && <Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready} title="Have the model propose folders for your topics"><Sparkles size={16} />Organize</Button>}
-            <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
-            <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
+    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
+      <div>
+        <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex h-control cursor-pointer items-center gap-2 text-sm" title="Ask the AI to draw a figure when one helps. It applies to problems and cards written from now on.">
+              <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => void setDiagrams(event.target.checked)} />
+              Generate diagrams
+            </label>
+            <ChatToggle open={subjectChatOpen} onToggle={toggleSubjectChat} />
+            <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
           </div>
         </div>
-        {tree.length > 0 && <TopicTree groups={groups} topics={topics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId} />}
-        {tree.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
-      </section>
+        {error && <ErrorMessage>{error}</ErrorMessage>}
+      </div>
 
-      <section>
-        <div className={sectionHead}><h2 className="text-xl font-semibold">Resources</h2><Button onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</Button></div>
-        <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple hidden onChange={e => void uploadFiles(e.currentTarget.files)} />
-        {resources.length > 0 && <List>{resources.map((resource) => <ListItem key={resource.id}><button type="button" className={rowTitle} onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text"><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button><IconButton label={`Remove ${resource.filename}`} tone="danger" onClick={() => removeResource(resource)}><Trash2 size={18} /></IconButton></ListItem>)}</List>}
-      </section>
-    </>}
+      {/* Below the title on narrow screens; beside everything, and in view while the page scrolls, on wide ones. */}
+      {subjectChat && <div className="mb-12 self-start lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mb-0">
+        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} className="lg:h-[min(40rem,calc(100dvh-14rem))]"
+          empty="Ask about your progress, weakest topics, or what to study next, or about the course material." />
+      </div>}
+
+      <div>
+        <section className="mb-12">
+          <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
+            <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
+              {topics.length > 1 && <Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready} title="Have the model propose folders for your topics"><Sparkles size={16} />Organize</Button>}
+              <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
+              <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
+            </div>
+          </div>
+          {tree.length > 0 && <TopicTree groups={groups} topics={topics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId} />}
+          {tree.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
+        </section>
+
+        <section>
+          <div className={sectionHead}><h2 className="text-xl font-semibold">Resources</h2><Button onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</Button></div>
+          <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple hidden onChange={e => void uploadFiles(e.currentTarget.files)} />
+          {resources.length > 0 && <List>{resources.map((resource) => <ListItem key={resource.id}><button type="button" className={rowTitle} onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text"><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button><IconButton label={`Remove ${resource.filename}`} tone="danger" onClick={() => removeResource(resource)}><Trash2 size={18} /></IconButton></ListItem>)}</List>}
+        </section>
+      </div>
+    </div>}
 
     {suggestions && <Modal title="Suggested topics" subtitle={suggestions.resource.filename} onClose={closeSuggestions}>
       <List>{suggestions.topics.map((suggestion) => {
@@ -738,7 +742,22 @@ function WithChat({ open, chat, children }: { open: boolean; chat: ReactNode; ch
   </div>;
 }
 
-const chatOpenKey = "tao-viewer-chat";
+// A boolean kept in localStorage under `key`, starting from `initial` when nothing is stored.
+function useStoredToggle(key: string, initial: boolean) {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    try { const stored = localStorage.getItem(key); if (stored) setValue(stored === "true"); } catch { /* Use the default. */ }
+  }, [key]);
+  const toggle = () => setValue((current) => {
+    try { localStorage.setItem(key, String(!current)); } catch { /* Keep it for this visit only. */ }
+    return !current;
+  });
+  return [value, toggle] as const;
+}
+
+function ChatToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return <IconButton label={open ? "Hide chat" : "Show chat"} aria-pressed={open} className="aria-pressed:text-accent" onClick={onToggle}><MessageSquare size={18} /></IconButton>;
+}
 
 // Tall enough to fill the modal below its title and tabs.
 const splitChat = "lg:h-[calc(100dvh-14rem)]";
