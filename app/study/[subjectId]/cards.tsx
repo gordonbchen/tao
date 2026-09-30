@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { List as ListIcon, Pencil, Plus, Sparkles, Upload } from "lucide-react";
+import { ChevronDown, List as ListIcon, Pencil, Plus, Sparkles, Upload } from "lucide-react";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { buildTree, flattenTree, groupPath, type TreeGroup, type TreeTopic } from "@/lib/topic-tree";
 import { api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDelete, useAISettings } from "../../components";
@@ -9,7 +9,7 @@ import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
 import { Badge, Button, Card, cn, ErrorMessage, IconButton, Input, Modal, Select, Spinner, Textarea } from "../../ui";
-import { selectionQuery, type StudySelection } from "./selection";
+import { selectionLabel, SelectionDialog, selectionQuery, type StudySelection } from "./selection";
 
 type Rating = 1 | 2 | 3 | 4;
 type Figures = { frontDiagram?: DiagramData | null; backDiagram?: DiagramData | null };
@@ -17,6 +17,7 @@ type ReviewCard = Figures & { id: string; topicId: string | null; topicName: str
 type Counts = { new: number; learning: number; review: number; total: number; nextDue: string | null };
 type StoredCard = Figures & { id: string; topicId: string | null; topicName: string | null; front: string; back: string; due: string; state: number };
 type Draft = Figures & { front: string; back: string };
+type GeneratedDraft = Draft & { topicId: string; topicName: string };
 type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit"; card: Figures & { id: string; topicId: string | null; front: string; back: string } };
 const ratingLabels: { value: Rating; label: string }[] = [{ value: 1, label: "Again" }, { value: 2, label: "Hard" }, { value: 3, label: "Good" }, { value: 4, label: "Easy" }];
 
@@ -142,7 +143,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
     {dialog?.kind === "add" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
     {dialog?.kind === "edit" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} card={dialog.card} topicId={dialog.card.topicId} onClose={closeDialog} onDelete={removeCard} />}
     {dialog?.kind === "import" && <ImportDialog subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
-    {dialog?.kind === "generate" && <GenerateDialog subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId ?? selectedTopics(selection, topics, groups)[0]?.id ?? topics[0]?.id} onClose={closeDialog} />}
+    {dialog?.kind === "generate" && <GenerateDialog subjectId={subjectId} topics={topics} groups={groups} selection={selection} onClose={closeDialog} />}
     {dialog?.kind === "browse" && <BrowseDialog subjectId={subjectId} query={query} onEdit={(edited) => setDialog({ kind: "edit", card: edited })} onClose={() => closeDialog(false)} />}
   </>;
 }
@@ -153,9 +154,12 @@ function useTopicOptions(topics: TreeTopic[], groups: TreeGroup[]) {
     ? [{ id: node.topic.id, label: [...groupPath(groups, node.topic.groupId), node.topic.name].join(" / ") }] : []), [groups, topics]);
 }
 
+// The topics a selection covers, in tree order; an empty selection covers every topic.
 function selectedTopics({ topicIds, groupIds }: StudySelection, topics: TreeTopic[], groups: TreeGroup[]) {
+  const ordered = flattenTree(buildTree(groups, topics)).flatMap((node) => node.kind === "topic" ? [node.topic] : []);
+  if (!topicIds.length && !groupIds.length) return ordered;
   const inGroup = (groupId: string | null): boolean => groupId !== null && (groupIds.includes(groupId) || inGroup(groups.find((group) => group.id === groupId)?.parentId ?? null));
-  return topics.filter((topic) => topicIds.includes(topic.id) || inGroup(topic.groupId));
+  return ordered.filter((topic) => topicIds.includes(topic.id) || inGroup(topic.groupId));
 }
 
 function TopicSelect({ topics, groups, value, onChange, allowNone }: { topics: TreeTopic[]; groups: TreeGroup[]; value: string | null; onChange: (id: string | null) => void; allowNone?: boolean }) {
@@ -226,8 +230,8 @@ function FigureRow({ diagram, onRemove }: { diagram: DiagramData; onRemove: () =
   </div>;
 }
 
-// A preview of cards before saving. With `kept`, each card has a checkbox.
-function DraftList({ drafts, kept, onToggle }: { drafts: Draft[]; kept?: Set<number>; onToggle?: (index: number) => void }) {
+// A preview of cards before saving. With `kept`, each card has a checkbox; `showTopics` labels each with its topic.
+function DraftList({ drafts, showTopics, kept, onToggle }: { drafts: (Draft & { topicName?: string })[]; showTopics?: boolean; kept?: Set<number>; onToggle?: (index: number) => void }) {
   const shown = kept ? drafts : drafts.slice(0, 50);
   return <>
     <ul className="max-h-[50vh] overflow-auto border-t border-line">
@@ -236,6 +240,7 @@ function DraftList({ drafts, kept, onToggle }: { drafts: Draft[]; kept?: Set<num
           {kept && <input type="checkbox" className="mt-1 size-4 flex-none accent-accent" checked={kept.has(index)} onChange={() => onToggle?.(index)} />}
           <span className="grid min-w-0 flex-1 grid-cols-2 gap-4 max-sm:grid-cols-1">
             <span className="min-w-0">
+              {showTopics && <span className="mb-1 block text-xs text-muted">{draft.topicName}</span>}
               <MathText className="whitespace-pre-wrap" text={draft.front} />
               {draft.frontDiagram && <Diagram className="mt-2" diagram={draft.frontDiagram} />}
             </span>
@@ -304,48 +309,78 @@ function ImportDialog({ subjectId, topics, groups, topicId: initialTopicId, onCl
   </Modal>;
 }
 
-function GenerateDialog({ subjectId, topics, groups, topicId: initialTopicId, onClose }: { subjectId: string; topics: TreeTopic[]; groups: TreeGroup[]; topicId?: string; onClose: (changed: boolean) => void }) {
-  const [topicId, setTopicId] = useState<string | null>(initialTopicId ?? null);
+// Drafts cards for each topic the selection covers, a few topics at a time, then saves the kept ones under their topics.
+function GenerateDialog({ subjectId, topics, groups, selection: initialSelection, onClose }: { subjectId: string; topics: TreeTopic[]; groups: TreeGroup[]; selection: StudySelection; onClose: (changed: boolean) => void }) {
+  const [selection, setSelection] = useState(initialSelection);
+  const [choosing, setChoosing] = useState(false);
   const [count, setCount] = useState<number | "auto">("auto");
-  const [result, setResult] = useState<{ cards: Draft[]; metadata: object } | null>(null);
+  const [result, setResult] = useState<{ cards: GeneratedDraft[]; metadata: object } | null>(null);
   const [kept, setKept] = useState<Set<number>>(new Set());
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const chosen = selectedTopics(selection, topics, groups);
 
   async function generate() {
-    if (!topicId) return;
-    setBusy(true); setError("");
-    try {
-      const generated = await api<{ cards: Draft[]; metadata: object }>(`/api/subjects/${subjectId}/cards/generate`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ topicId, count }) });
-      setResult(generated); setKept(new Set(generated.cards.map((_, index) => index)));
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not generate cards"); }
-    finally { setBusy(false); }
+    if (!chosen.length) return;
+    setBusy(true); setError(""); setProgress({ done: 0, total: chosen.length });
+    const drafts: GeneratedDraft[][] = [];
+    let metadata: object = {};
+    let failure = "";
+    let next = 0;
+    const worker = async () => {
+      for (let index = next++; index < chosen.length; index = next++) {
+        const topic = chosen[index];
+        try {
+          const generated = await api<{ cards: Draft[]; metadata: object }>(`/api/subjects/${subjectId}/cards/generate`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ topicId: topic.id, count }) });
+          drafts[index] = generated.cards.map((card) => ({ ...card, topicId: topic.id, topicName: topic.name }));
+          metadata = generated.metadata;
+        } catch (e) { failure = `${topic.name}: ${e instanceof Error ? e.message : "Could not generate cards"}`; }
+        setProgress((current) => current && { ...current, done: current.done + 1 });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, chosen.length) }, worker));
+    const cards = drafts.flat().filter(Boolean);
+    if (failure) setError(failure);
+    if (!failure || cards.length) { setResult({ cards, metadata }); setKept(new Set(cards.map((_, index) => index))); }
+    setBusy(false); setProgress(null);
   }
 
   async function save() {
     if (!result) return;
     setBusy(true); setError("");
-    try { await saveDrafts(subjectId, result.cards.filter((_, index) => kept.has(index)), topicId, "ai", result.metadata); onClose(true); }
-    catch (e) { setError(e instanceof Error ? e.message : "Could not save these cards"); setBusy(false); }
+    const byTopic = new Map<string, Draft[]>();
+    result.cards.forEach((card, index) => { if (kept.has(index)) byTopic.set(card.topicId, [...(byTopic.get(card.topicId) ?? []), card]); });
+    try {
+      for (const [topicId, cards] of byTopic) await saveDrafts(subjectId, cards, topicId, "ai", result.metadata);
+      onClose(true);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save these cards"); setBusy(false); }
   }
 
-  return <Modal title="Generate cards" subtitle={result ? "Uncheck any card you don’t want to keep." : "From the topic’s coverage summary and linked resources."} onClose={() => onClose(false)} wide={Boolean(result)}>
+  const several = chosen.length > 1;
+  return <Modal title="Generate cards" subtitle={result ? "Uncheck any card you don’t want to keep." : "From each topic’s coverage summary and linked resources."} onClose={() => onClose(false)} wide={Boolean(result)}>
     {!result ? <div className="flex flex-col gap-4">
-      <Field label="Topic"><TopicSelect topics={topics} groups={groups} value={topicId} onChange={setTopicId} /></Field>
-      <Field label="How many"><Select value={count} onChange={(event) => setCount(event.target.value === "auto" ? "auto" : Number(event.target.value))}>
+      <Field label="Topics"><Button className="w-full justify-between" onClick={() => setChoosing(true)} disabled={busy}>
+        <span className="truncate">{selectionLabel(selection, topics, groups)}</span><ChevronDown size={16} className="flex-none" />
+      </Button></Field>
+      <Field label={several ? "How many per topic" : "How many"}><Select value={count} onChange={(event) => setCount(event.target.value === "auto" ? "auto" : Number(event.target.value))}>
         <option value="auto">Auto: as many as the material needs</option>
         {[5, 10, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}
       </Select></Field>
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
         <Button onClick={() => onClose(false)}>Cancel</Button>
-        <Button variant="primary" disabled={!topicId || busy} onClick={() => void generate()}>{busy ? <><Spinner />Writing cards…</> : "Generate"}</Button>
+        <Button variant="primary" disabled={!chosen.length || busy} onClick={() => void generate()}>{busy
+          ? <><Spinner />{progress && progress.total > 1 ? `Writing cards… ${progress.done} of ${progress.total} topics` : "Writing cards…"}</>
+          : several ? `Generate for ${chosen.length} topics` : "Generate"}</Button>
       </div>
+      {choosing && <SelectionDialog value={selection} topics={topics} groups={groups} applyLabel="Use selected" onClose={() => setChoosing(false)} onApply={(next) => { setChoosing(false); setSelection(next); }} />}
     </div> : <div className="flex flex-col gap-4">
-      {!result.cards.length ? <p className="text-muted">Your existing cards already cover this topic.</p> : <DraftList drafts={result.cards} kept={kept} onToggle={(index) => setKept((current) => { const next = new Set(current); if (!next.delete(index)) next.add(index); return next; })} />}
+      {!result.cards.length ? <p className="text-muted">Your existing cards already cover {several ? "these topics" : "this topic"}.</p>
+        : <DraftList drafts={result.cards} showTopics={several} kept={kept} onToggle={(index) => setKept((current) => { const next = new Set(current); if (!next.delete(index)) next.add(index); return next; })} />}
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
-        <Button onClick={() => setResult(null)} disabled={busy}>Back</Button>
+        <Button onClick={() => { setResult(null); setError(""); }} disabled={busy}>Back</Button>
         <Button variant="primary" onClick={() => void save()} disabled={busy || !kept.size}>{busy ? <><Spinner />Saving…</> : `Keep ${kept.size} cards`}</Button>
       </div>
     </div>}

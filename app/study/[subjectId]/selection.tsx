@@ -20,8 +20,8 @@ export function selectionLabel({ topicIds, groupIds }: StudySelection, topics: T
 }
 
 // Tree of checkboxes for choosing what to study. Checking a folder includes everything inside it.
-export function SelectionDialog({ value, topics, groups, onApply, onClose }: {
-  value: StudySelection; topics: TreeTopic[]; groups: TreeGroup[]; onApply: (selection: StudySelection) => void; onClose: () => void;
+export function SelectionDialog({ value, topics, groups, onApply, onClose, applyLabel = "Study selected" }: {
+  value: StudySelection; topics: TreeTopic[]; groups: TreeGroup[]; onApply: (selection: StudySelection) => void; onClose: () => void; applyLabel?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const rows = flattenTree(buildTree(groups, topics));
@@ -57,7 +57,7 @@ export function SelectionDialog({ value, topics, groups, onApply, onClose }: {
     </ul>
     <div className="mt-6 flex justify-end gap-2">
       <Button onClick={() => onApply({ topicIds: [], groupIds: [] })}>All topics</Button>
-      <Button variant="primary" onClick={() => onApply(draft)}>Study selected</Button>
+      <Button variant="primary" onClick={() => onApply(draft)}>{applyLabel}</Button>
     </div>
   </Modal>;
 }
