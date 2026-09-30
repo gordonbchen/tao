@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRight, CheckCircle2, CircleHelp, List as ListIcon, RotateCcw, ThumbsUp, TriangleAlert } from "lucide-react";
+import { ArrowRight, CheckCircle2, CircleHelp, List as ListIcon, RotateCcw, Sparkles, ThumbsUp, TriangleAlert } from "lucide-react";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
-import { Badge, Button, Card, cn, ErrorMessage, Input, Modal, Spinner, Textarea, ToggleButton } from "../../ui";
+import { Badge, Button, Card, cn, ErrorMessage, Field, Input, Modal, Select, Spinner, Textarea, ToggleButton } from "../../ui";
 import { selectionQuery, type StudySelection } from "./selection";
 
 type Problem = { id: string; topicId: string; prompt: string; difficulty: string; diagram?: DiagramData | null; isReview?: boolean; messages?: ChatMessage[] };
@@ -24,6 +24,18 @@ const skipReasons = [
   { value: "outside_coverage", label: "Outside my course" },
   { value: "other", label: "Other" },
 ];
+const difficulties = { auto: "Auto: from your review history", easy: "Easy", okay: "Medium", hard: "Hard" };
+const answerDepths = { short: "Short: a value or a line or two", standard: "Standard: a few steps of working", full: "Full: a complete proof or derivation" };
+type Settings = { difficulty: keyof typeof difficulties; answerDepth: keyof typeof answerDepths };
+const SETTINGS_KEY = "tao-problem-settings";
+
+// The difficulty and answer length new problems ask for; remembered in this browser.
+function readSettings(): Settings {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
+    return { difficulty: stored.difficulty in difficulties ? stored.difficulty : "auto", answerDepth: stored.answerDepth in answerDepths ? stored.answerDepth : "standard" };
+  } catch { return { difficulty: "auto", answerDepth: "standard" }; }
+}
 
 // One generated problem at a time for the selection, with answer checking and the tutor chat.
 // The parent remounts it when the selection changes.
@@ -40,10 +52,12 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   const [savingProblemFeedback, setSavingProblemFeedback] = useState(false);
   const [problemFeedbackSaved, setProblemFeedbackSaved] = useState(false);
   const [working, setWorking] = useState(false);
-  const [generating, setGenerating] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [browsing, setBrowsing] = useState(false);
-  const autoStarted = useRef(false);
+  const [settings, setSettings] = useState(readSettings);
+  const [choosingSettings, setChoosingSettings] = useState(false);
   // Counts problem loads so a slow generation cannot replace a problem opened from Browse meanwhile.
   const loadCount = useRef(0);
   // Stops the problem being made or the answer being checked.
@@ -69,6 +83,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     setFeedbackMode(null); setProblemFeedbackTags([]); setProblemFeedbackNote(""); setProblemFeedbackSaved(false);
   }, []);
 
+  // Problems are made only when the student asks, with the chosen settings.
   const generate = useCallback(async (skipReuse = false) => {
     if (!ai.configured) {
       setGenerating(false);
@@ -79,16 +94,17 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     const load = ++loadCount.current;
     const controller = new AbortController();
     stopper.current = controller;
-    setWorking(true); setGenerating(true); setError("");
+    // The spinner and Stop take the problem's place while the next one is made.
+    setProblem(null); setWorking(true); setGenerating(true); setError("");
     try {
       const result = await aiApi<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...selection, ...(skipReuse ? { skipReuse: true } : {}) }), signal: controller.signal });
+        body: JSON.stringify({ ...selection, ...settings, ...(skipReuse ? { skipReuse: true } : {}) }), signal: controller.signal });
       if (load === loadCount.current) show(result.problem, null);
     } catch (e) {
       if (load === loadCount.current && !isAbort(e)) setError(e instanceof Error ? e.message : "Could not create a problem");
     }
     finally { if (load === loadCount.current) { setWorking(false); setGenerating(false); stopper.current = null; } }
-  }, [ai.configured, subjectId, selection, show]);
+  }, [ai.configured, subjectId, selection, settings, show]);
 
   // Opens a past problem with its chat and latest attempt, replacing any problem still being generated.
   async function open(id: string) {
@@ -103,12 +119,19 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     finally { if (load === loadCount.current) { setWorking(false); setGenerating(false); } }
   }
 
-  // The ref prevents React Strict Mode from generating duplicate first problems.
+  // Returns to the problem left unanswered in this selection, if any; otherwise the student makes one.
   useEffect(() => {
-    if (!ai.ready || autoStarted.current) return;
-    autoStarted.current = true;
-    void generate();
-  }, [ai.ready, generate]);
+    const load = ++loadCount.current;
+    api<{ problem: Problem | null }>(`/api/subjects/${subjectId}/problems/current?${selectionQuery(selection)}`)
+      .then((result) => { if (load === loadCount.current && result.problem) show(result.problem, null); })
+      .catch((e) => { if (load === loadCount.current) setError(e instanceof Error ? e.message : "Could not load practice"); })
+      .finally(() => setLoading(false));
+  }, [subjectId, selection, show]);
+
+  function saveSettings(next: Settings) {
+    setSettings(next);
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* Keep them for this visit only. */ }
+  }
 
   async function askTutor(message: string, signal: AbortSignal) {
     if (!problem) throw new Error("No problem is open.");
@@ -152,15 +175,37 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     setFeedbackMode(mode); setProblemFeedbackTags([]); setProblemFeedbackNote(""); setProblemFeedbackSaved(false);
   }
 
-  const toolbar = <div className="mb-4 flex justify-end">
+  const settingsFields = <>
+    <Field label="Difficulty"><Select value={settings.difficulty} onChange={(event) => saveSettings({ ...settings, difficulty: event.target.value as Settings["difficulty"] })}>
+      {Object.entries(difficulties).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </Select></Field>
+    <Field label="Answer"><Select value={settings.answerDepth} onChange={(event) => saveSettings({ ...settings, answerDepth: event.target.value as Settings["answerDepth"] })}>
+      {Object.entries(answerDepths).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </Select></Field>
+  </>;
+  const toolbar = <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+    {problem && <Button variant="ghost" onClick={() => ai.configured ? setChoosingSettings(true) : notifyAiSetupRequired()} disabled={working}><Sparkles size={16} />New problem</Button>}
     <Button variant="ghost" onClick={() => setBrowsing(true)}><ListIcon size={16} />Browse</Button>
   </div>;
-  const browseDialog = browsing && <BrowseDialog subjectId={subjectId} selection={selection} onOpen={open} onClose={() => setBrowsing(false)} />;
+  const dialogs = <>
+    {browsing && <BrowseDialog subjectId={subjectId} selection={selection} onOpen={open} onClose={() => setBrowsing(false)} />}
+    {choosingSettings && <Modal title="New problem" onClose={() => setChoosingSettings(false)}>
+      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); setChoosingSettings(false); void generate(true); }}>
+        {settingsFields}
+        <div className="flex justify-end gap-2"><Button onClick={() => setChoosingSettings(false)}>Cancel</Button><Button type="submit" variant="primary" autoFocus>Make problem</Button></div>
+      </form>
+    </Modal>}
+  </>;
 
-  if (!problem) return <>{toolbar}<div className="flex flex-col items-start gap-4 py-8">{generating ? <div className="flex items-center gap-3 text-muted"><Spinner />Making a problem…<Button size="sm" variant="ghost" onClick={stop}>Stop</Button></div> : <>
-    {error && <ErrorMessage className="my-0 w-full">{error}</ErrorMessage>}
-    <Button variant="primary" onClick={() => ai.configured ? generate() : notifyAiSetupRequired()} disabled={working}>{ai.configured ? "Try again" : "Connect AI"}</Button>
-  </>}</div>{browseDialog}</>;
+  if (!problem) return <>{toolbar}{loading ? <p className="inline-flex items-center gap-3 py-8 text-muted"><Spinner />Loading practice…</p>
+    : generating ? <div className="flex items-center gap-3 py-8 text-muted"><Spinner />Making a problem…<Button size="sm" variant="ghost" onClick={stop}>Stop</Button></div>
+    : <Card className="max-w-md p-6 max-sm:p-4">
+      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (ai.configured) void generate(); else notifyAiSetupRequired(); }}>
+        {settingsFields}
+        {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
+        <Button type="submit" variant="primary" className="self-start">{ai.configured ? <><Sparkles size={16} />Make a problem</> : "Connect AI"}</Button>
+      </form>
+    </Card>}{dialogs}</>;
 
   const correctnessLabel = feedback?.correctness === "correct" ? "That’s right" : feedback?.correctness === "partial" ? "Good progress" : feedback?.correctness === "incorrect" ? "Let’s work through it" : "Let’s take a closer look";
   const FeedbackIcon = feedback?.correctness === "correct" ? CheckCircle2 : feedback?.correctness === "incorrect" ? TriangleAlert : feedback?.correctness === "uncertain" ? CircleHelp : ThumbsUp;
@@ -192,7 +237,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="How hard was it?">{ratings.map(option => <ToggleButton key={option.value} pressed={rating === option.value} onClick={() => setRating(option.value)}>{option.label}</ToggleButton>)}</div>
           <div className="flex items-center gap-2">
-            {working && !generating && <Button size="sm" variant="ghost" onClick={stop}>Stop</Button>}
+            {working && <Button size="sm" variant="ghost" onClick={stop}>Stop</Button>}
             <Button type="submit" size="sm" variant="primary" disabled={!answer.trim() || working}>{working ? <><Spinner />Checking…</> : <>Check answer <ArrowRight size={16} /></>}</Button>
           </div>
         </div>
@@ -206,13 +251,12 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           {feedback.solution && <Button variant="ghost" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide solution" : "Show solution"}</Button>}
           <Button variant="ghost" onClick={() => { setFeedback(null); setShowSolution(false); }} disabled={working}><RotateCcw size={16} />Try again</Button>
-          {generating && <Button variant="ghost" onClick={stop}>Stop</Button>}
-          <Button variant="primary" onClick={() => generate()} disabled={working}>{working ? <><Spinner />Making a problem…</> : <>Next problem <ArrowRight size={16} /></>}</Button>
+          <Button variant="primary" onClick={() => generate()} disabled={working}>Next problem <ArrowRight size={16} /></Button>
         </div>
       </section>}
     </div>
     <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
-  </div>{browseDialog}</>;
+  </div>{dialogs}</>;
 }
 
 function BrowseDialog({ subjectId, selection, onOpen, onClose }: { subjectId: string; selection: StudySelection; onOpen: (id: string) => void; onClose: () => void }) {

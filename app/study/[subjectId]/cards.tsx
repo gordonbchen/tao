@@ -8,7 +8,7 @@ import { aiApi, api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDel
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
-import { Badge, Button, Card, cn, ErrorMessage, IconButton, Input, Modal, Select, Spinner, Textarea } from "../../ui";
+import { Badge, Button, Card, cn, ErrorMessage, Field, IconButton, Input, Modal, Select, Spinner, Textarea } from "../../ui";
 import { selectionLabel, SelectionDialog, selectionQuery, type StudySelection } from "./selection";
 
 type Rating = 1 | 2 | 3 | 4;
@@ -173,10 +173,6 @@ function TopicSelect({ topics, groups, value, onChange, allowNone }: { topics: T
     {allowNone && <option value="">No topic</option>}
     {options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
   </Select>;
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="flex flex-col gap-2 text-sm"><span className="text-muted">{label}</span>{children}</label>;
 }
 
 // Adds cards one after another (staying open), or edits one card.

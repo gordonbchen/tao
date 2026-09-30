@@ -15,9 +15,6 @@ export const inSelection = `((cardinality($1::uuid[]) = 0 AND cardinality($3::uu
 
 export const selectionParams = (subjectId: string, { topicIds, groupIds }: Selection) => [groupIds, subjectId, topicIds];
 
-export const selectionKey = (subjectId: string, { topicIds, groupIds }: Selection) =>
-  `${subjectId}:${[...topicIds].sort().join(",")}:${[...groupIds].sort().join(",")}`;
-
 // Reads `topicIds` and `groupIds` from a JSON body. Returns an error message for invalid input.
 export function selectionFromBody(body: { topicIds?: unknown; groupIds?: unknown }): Selection | string {
   return validate(body.topicIds ?? [], body.groupIds ?? []);

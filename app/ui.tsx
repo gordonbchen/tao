@@ -47,6 +47,11 @@ export function Select({ className, ...props }: ComponentProps<"select">) {
   return <select className={cn(field, "h-control px-3 text-sm", className)} {...props} />;
 }
 
+// A labelled form control, with the label above it.
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="flex flex-col gap-2 text-sm"><span className="text-muted">{label}</span>{children}</label>;
+}
+
 export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cn(field, "block w-full resize-y px-3 py-2 leading-relaxed", className)} {...props} />;
 }

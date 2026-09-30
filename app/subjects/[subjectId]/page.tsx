@@ -174,16 +174,6 @@ function SubjectContent() {
   const tree = flattenTree(buildTree(groups, organizedTopics));
   const visibleTopics = [...tree.flatMap((node) => node.kind === "topic" ? [node.topic] : []), ...unorganizedTopics];
   const visibleGroups = tree.flatMap((node) => node.kind === "group" ? [node.group] : []);
-  // Have one any-topic practice problem generated and waiting so Practice opens without a delay.
-  // Topic and folder practice (from the tree's menu) prepare their next problem once started.
-  const hasTopics = topics.length > 0;
-  useEffect(() => {
-    if (!aiSettings.configured || !hasTopics) return;
-    void fetch(`/api/subjects/${id}/problems/ready`, {
-      method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: "{}",
-    }).catch(() => {});
-  }, [id, aiSettings.configured, hasTopics]);
-
   // Flashcards work without AI; problems need a signed-in provider. Without a mode, the study page opens the last one used.
   function startPractice(target: { topicId?: string; groupId?: string } = {}, mode?: "problems" | "cards") {
     if (mode !== "cards" && !aiSettings.ready) return;
