@@ -799,7 +799,7 @@ function useMediaQuery(query: string) {
 }
 
 function ChatToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  return <IconButton label={open ? "Hide chat" : "Show chat"} aria-pressed={open} className="aria-pressed:text-accent" onClick={onToggle}><MessageSquare size={18} /></IconButton>;
+  return <IconButton label={open ? "Hide chat" : "Show chat"} aria-pressed={open} className="aria-pressed:text-accent" onClick={onToggle}><MessageSquare size={18} fill={open ? "currentColor" : "none"} /></IconButton>;
 }
 
 // Tall enough to fill the modal below its title and tabs.
