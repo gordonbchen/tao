@@ -51,8 +51,10 @@ export function chatDiagramInstructions(secret = "") {
   return `diagram is null unless the student asks for a figure or one would clearly explain better than words, such as a free-body diagram, a process, or a geometric configuration. When you draw one, the reply must still make sense without it. ${secret} ${DIAGRAM_RULES}`;
 }
 
-// Instructions for a generation prompt, depending on the subject's diagram setting.
-export function diagramInstructions(enabled: boolean, fields: string, secret: string) {
-  if (!enabled) return `Set ${fields} to null.`;
+// Instructions for a generation prompt's figures: "asked" when the student asked for them, "judged" when the model decides
+// (problems), and "none" when they are off.
+export function diagramInstructions(mode: "asked" | "judged" | "none", fields: string, secret: string) {
+  if (mode === "none") return `Set ${fields} to null.`;
+  if (mode === "judged") return `${fields} are optional diagrams; set them to null unless a figure is part of the problem, such as a configuration the question refers to, or would clearly explain better than words. Most problems need none. The text must still make sense without the figure. ${secret} ${DIAGRAM_RULES}`;
   return `${fields} are diagrams. The student has asked for figures, so draw one wherever a figure is the natural way to show or check the idea: a free-body diagram, a cycle or process, a timeline, a geometric configuration, a circuit, a labelled structure, a comparison. Set it to null only when a figure would add nothing, such as for a bare definition, date, or word. The text must still make sense without the figure. ${secret} ${DIAGRAM_RULES}`;
 }

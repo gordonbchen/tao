@@ -19,7 +19,7 @@ export function saveDraft(key: string | undefined, text: string) {
   try { if (text.trim()) localStorage.setItem(draftKey(key), text); else localStorage.removeItem(draftKey(key)); } catch { /* Keep it for this visit only. */ }
 }
 
-export type Subject = { id: string; name: string; topicCount: number; dueCount: number; diagrams?: boolean };
+export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
 type AIProviderStatus = { id: string; label: string; running: boolean; signedIn: boolean };
 type AIStatus = { available: boolean; providers: AIProviderStatus[]; models: { id: string; provider: string }[]; defaultModel: string };

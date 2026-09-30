@@ -6,7 +6,7 @@ type RouteContext = { params: Promise<{ subjectId: string }> };
 export async function GET(_request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId)) return jsonError("Subject not found", 404);
-  const subjectResult = await query(`SELECT id, name, diagrams, created_at AS "createdAt" FROM subjects WHERE id = $1 AND owner_id = $2`, [subjectId, LOCAL_OWNER_ID]);
+  const subjectResult = await query(`SELECT id, name, created_at AS "createdAt" FROM subjects WHERE id = $1 AND owner_id = $2`, [subjectId, LOCAL_OWNER_ID]);
   if (!subjectResult.rows[0]) return jsonError("Subject not found", 404);
   const [topicsResult, groupsResult, resourcesResult] = await Promise.all([
     query(`SELECT t.id, t.name, t.group_id AS "groupId", t.position, t.unorganized, t.coverage_confirmed AS "coverageConfirmed", t.summary_status AS "summaryStatus",
@@ -26,20 +26,15 @@ export async function GET(_request: Request, { params }: RouteContext) {
 export async function PATCH(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId)) return jsonError("Subject not found", 404);
-  let body: { name?: string; diagrams?: unknown };
+  let body: { name?: string };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
-  if (body.diagrams !== undefined && typeof body.diagrams !== "boolean") return jsonError("diagrams must be true or false");
   if (body.name !== undefined && typeof body.name !== "string") return jsonError("Subject name must be text");
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   if (name !== undefined && (!name || name.length > 120)) return jsonError("Subject name must be 1–120 characters");
-  const result = await query<{ diagramsChanged: boolean }>(`UPDATE subjects s SET name = coalesce($3, s.name), diagrams = coalesce($4, s.diagrams), updated_at = now()
-    FROM subjects old WHERE s.id = $1 AND s.owner_id = $2 AND old.id = s.id
-    RETURNING s.id, s.name, s.diagrams, s.created_at AS "createdAt", s.diagrams <> old.diagrams AS "diagramsChanged"`, [subjectId, LOCAL_OWNER_ID, name ?? null, body.diagrams ?? null]);
+  const result = await query(`UPDATE subjects SET name = coalesce($3, name), updated_at = now()
+    WHERE id = $1 AND owner_id = $2 RETURNING id, name, created_at AS "createdAt"`, [subjectId, LOCAL_OWNER_ID, name ?? null]);
   if (!result.rows[0]) return jsonError("Subject not found", 404);
-  const { diagramsChanged, ...subject } = result.rows[0];
-  // Problems generated ahead of time followed the old setting, so the next ones are generated fresh.
-  if (diagramsChanged) await query("DELETE FROM problems WHERE subject_id = $1 AND served_at IS NULL", [subjectId]);
-  return Response.json(subject);
+  return Response.json(result.rows[0]);
 }
 
 export async function DELETE(_request: Request, { params }: RouteContext) {

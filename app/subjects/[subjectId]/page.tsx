@@ -155,23 +155,13 @@ function SubjectContent() {
   const visibleGroups = tree.flatMap((node) => node.kind === "group" ? [node.group] : []);
   // Have one any-topic practice problem generated and waiting so Practice opens without a delay.
   // Topic and folder practice (from the tree's menu) prepare their next problem once started.
-  // Changing the diagram setting discards the waiting problem, so one is prepared again.
   const hasTopics = topics.length > 0;
-  const diagrams = Boolean(subject?.diagrams);
   useEffect(() => {
     if (!aiSettings.configured || !hasTopics) return;
     void fetch(`/api/subjects/${id}/problems/ready`, {
       method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: "{}",
     }).catch(() => {});
-  }, [id, aiSettings.configured, hasTopics, diagrams]);
-
-  // Whether the AI may draw figures when it writes this subject's problems and cards. Shown figures are unaffected.
-  async function setDiagrams(on: boolean) {
-    try {
-      await api(`/api/subjects/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ diagrams: on }) });
-      setSubject((current) => current && { ...current, diagrams: on });
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not save the diagram setting"); }
-  }
+  }, [id, aiSettings.configured, hasTopics]);
 
   // Flashcards work without AI; problems need a signed-in provider. Without a mode, the study page opens the last one used.
   function startPractice(target: { topicId?: string; groupId?: string } = {}, mode?: "problems" | "cards") {
@@ -651,10 +641,6 @@ function SubjectContent() {
       <div>
         <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
           <div className="flex flex-wrap items-center gap-4">
-            <label className="flex h-control cursor-pointer items-center gap-2 text-sm" title="Ask the AI to draw a figure when one helps. It applies to problems and cards written from now on.">
-              <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => void setDiagrams(event.target.checked)} />
-              Generate diagrams
-            </label>
             <ChatToggle open={subjectChatOpen} onToggle={toggleSubjectChat} />
             <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
           </div>

@@ -21,6 +21,8 @@ type GeneratedDraft = Draft & { topicId: string; topicName: string };
 type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit"; card: Figures & { id: string; topicId: string | null; front: string; back: string } };
 const ratingLabels: { value: Rating; label: string }[] = [{ value: 1, label: "Again" }, { value: 2, label: "Hard" }, { value: 3, label: "Good" }, { value: 4, label: "Easy" }];
 
+const DIAGRAMS_KEY = "tao-card-diagrams";
+
 const jsonHeaders = () => ({ ...getAiRequestHeaders(), "Content-Type": "application/json" });
 
 function when(date: string) {
@@ -314,6 +316,8 @@ function GenerateDialog({ subjectId, topics, groups, selection: initialSelection
   const [selection, setSelection] = useState(initialSelection);
   const [choosing, setChoosing] = useState(false);
   const [count, setCount] = useState<number | "auto">("auto");
+  // Whether the model should draw figures on the cards; remembered in this browser.
+  const [diagrams, setDiagrams] = useState(() => { try { return localStorage.getItem(DIAGRAMS_KEY) === "true"; } catch { return false; } });
   const [result, setResult] = useState<{ cards: GeneratedDraft[]; metadata: object } | null>(null);
   const [kept, setKept] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -332,7 +336,7 @@ function GenerateDialog({ subjectId, topics, groups, selection: initialSelection
       for (let index = next++; index < chosen.length; index = next++) {
         const topic = chosen[index];
         try {
-          const generated = await api<{ cards: Draft[]; metadata: object }>(`/api/subjects/${subjectId}/cards/generate`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ topicId: topic.id, count }) });
+          const generated = await api<{ cards: Draft[]; metadata: object }>(`/api/subjects/${subjectId}/cards/generate`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ topicId: topic.id, count, diagrams }) });
           drafts[index] = generated.cards.map((card) => ({ ...card, topicId: topic.id, topicName: topic.name }));
           metadata = generated.metadata;
         } catch (e) { failure = `${topic.name}: ${e instanceof Error ? e.message : "Could not generate cards"}`; }
@@ -367,6 +371,13 @@ function GenerateDialog({ subjectId, topics, groups, selection: initialSelection
         <option value="auto">Auto: as many as the material needs</option>
         {[5, 10, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}
       </Select></Field>
+      <label className="flex cursor-pointer items-center gap-2 text-sm" title="Mermaid for structure such as processes and timelines, SVG for drawings such as geometry. Generated figures can be wrong.">
+        <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => {
+          setDiagrams(event.target.checked);
+          try { localStorage.setItem(DIAGRAMS_KEY, String(event.target.checked)); } catch { /* Keep it for this dialog only. */ }
+        }} />
+        Draw diagrams where they help
+      </label>
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
         <Button onClick={() => onClose(false)}>Cancel</Button>
