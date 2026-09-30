@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, History, Lightbulb, ListCollapse, MessageSquarePlus, Pencil, Send } from "lucide-react";
 import { recentMessages, sinceSummary } from "@/lib/chat-context";
-import { api, getAiRequestHeaders, notifyAiSetupRequired, useAISettings } from "./components";
+import { api, getAiRequestHeaders, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "./components";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { Diagram } from "./diagram";
 import { MathText } from "./math-text";
@@ -22,9 +22,10 @@ const when = (date: string) => new Date(date).toLocaleString(undefined, { dateSt
 // `send` returns the tutor's reply. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
 // that message, `summarize` adds a button that condenses the conversation so far, `clear` one that starts a new chat,
 // and `history` one that lists earlier chats to read. `rename` makes the chat's name (and earlier chats' names) editable;
-// without `clearedAt` it renames the current chat.
-export function Chat({ initialMessages = [], initialName = "", send, placeholder, empty, hint, summarize, clear, history, rename, className }: {
+// without `clearedAt` it renames the current chat. `draftKey` keeps the unsent message in this browser as it is typed.
+export function Chat({ initialMessages = [], initialName = "", draftKey, send, placeholder, empty, hint, summarize, clear, history, rename, className }: {
   initialName?: string;
+  draftKey?: string;
   initialMessages?: ChatMessage[];
   send: (text: string) => Promise<ChatReply>;
   placeholder: string;
@@ -39,7 +40,9 @@ export function Chat({ initialMessages = [], initialName = "", send, placeholder
   const [messages, setMessages] = useState(initialMessages);
   const [name, setName] = useState(initialName);
   const [renameError, setRenameError] = useState("");
-  const [text, setText] = useState("");
+  // Chats render only in the browser, after their messages load, so the draft can be read on the first render.
+  const [text, setTextState] = useState(() => readDraft(draftKey));
+  const setText = (value: string) => { setTextState(value); saveDraft(draftKey, value); };
   // What the chat is waiting for, shown beside a spinner; empty when idle.
   const [busy, setBusy] = useState("");
   // Earlier chats while browsing them, and the one being read.
@@ -200,7 +203,7 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
 
   if (error) return <ErrorMessage>{error}</ErrorMessage>;
   if (!chat) return <p className="flex items-center gap-2 text-sm text-muted"><Spinner />Loading the chat…</p>;
-  return <Chat className={cn("h-[min(36rem,calc(100dvh-240px))]", className)} initialMessages={chat.messages} initialName={chat.name} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
+  return <Chat className={cn("h-[min(36rem,calc(100dvh-240px))]", className)} initialMessages={chat.messages} initialName={chat.name} draftKey={`chat:${path}`} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
     history={async () => (await api<{ chats: PastChat[] }>(`${path}?archived=1`)).chats}
     rename={async (name, clearedAt) => { await api(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, clearedAt }) }); }}
     placeholder={`Ask about ${name}…`} empty={empty} />;

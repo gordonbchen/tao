@@ -6,6 +6,18 @@ import Image from "next/image";
 import { KeyRound, Menu, Moon, Sun, X } from "lucide-react";
 import { Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Select, Spinner } from "./ui";
 
+// Unsent text (a chat message or a problem answer) kept in this browser as it is typed, so closing the page
+// does not lose it. Clearing the text removes the draft.
+const draftKey = (key: string) => `tao-draft:${key}`;
+export function readDraft(key: string | undefined) {
+  if (!key) return "";
+  try { return localStorage.getItem(draftKey(key)) ?? ""; } catch { return ""; }
+}
+export function saveDraft(key: string | undefined, text: string) {
+  if (!key) return;
+  try { if (text.trim()) localStorage.setItem(draftKey(key), text); else localStorage.removeItem(draftKey(key)); } catch { /* Keep it for this visit only. */ }
+}
+
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number; diagrams?: boolean };
 
 type AIProviderStatus = { id: string; label: string; running: boolean; signedIn: boolean };

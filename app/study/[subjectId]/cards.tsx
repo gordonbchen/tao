@@ -137,7 +137,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
               </Button>)}
             </div>}
         </div>
-        <Chat key={card.id} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={card.messages} send={askTutor} placeholder={revealed ? "Ask about this card…" : "Ask without seeing the answer…"} empty="Ask the tutor about this card, or use the lightbulb for a hint that keeps the answer hidden." />
+        <Chat key={card.id} draftKey={`chat:card:${card.id}`} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={card.messages} send={askTutor} placeholder={revealed ? "Ask about this card…" : "Ask without seeing the answer…"} empty="Ask the tutor about this card, or use the lightbulb for a hint that keeps the answer hidden." />
       </div>}
     {dialog?.kind === "add" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
     {dialog?.kind === "edit" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} card={dialog.card} topicId={dialog.card.topicId} onClose={closeDialog} onDelete={removeCard} />}

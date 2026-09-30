@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, CircleHelp, List as ListIcon, RotateCcw, ThumbsUp, TriangleAlert } from "lucide-react";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
-import { api, notifyAiSetupRequired, useAISettings } from "../../components";
+import { api, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
@@ -62,7 +62,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   }, [ai.requestHeaders]);
 
   const show = useCallback((next: Problem, attempt: Attempt | null) => {
-    setProblem(next); setFeedback(attempt); setShowSolution(false); setAnswer(attempt?.answer ?? ""); setRating(attempt?.rating ?? "okay");
+    setProblem(next); setFeedback(attempt); setShowSolution(false); setAnswer(readDraft(`answer:${next.id}`) || attempt?.answer || ""); setRating(attempt?.rating ?? "okay");
     setFeedbackMode(null); setProblemFeedbackTags([]); setProblemFeedbackNote(""); setProblemFeedbackSaved(false);
   }, []);
 
@@ -114,7 +114,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     setWorking(true); setError("");
     try {
       const result = await api<Feedback>(`/api/problems/${problem.id}/attempts`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ answer: answer.trim(), difficulty: rating }) });
-      setFeedback(result); setShowSolution(false); setFeedbackMode(null);
+      setFeedback(result); setShowSolution(false); setFeedbackMode(null); saveDraft(`answer:${problem.id}`, "");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not check your answer"); }
     finally { setWorking(false); }
   }
@@ -175,7 +175,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
       {problemFeedbackSaved && <p className="text-sm text-muted" role="status">Thanks, your feedback will guide future questions on this topic.</p>}
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       {!feedback ? <Card className="p-4"><form onSubmit={submitAttempt}>
-        <Textarea ref={answerInput} rows={4} className="min-h-32 border-0 px-0 hover:border-0" aria-label="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Write your answer…" />
+        <Textarea ref={answerInput} rows={4} className="min-h-32 border-0 px-0 hover:border-0" aria-label="Your answer" value={answer} onChange={e => { setAnswer(e.target.value); saveDraft(`answer:${problem.id}`, e.target.value); }} placeholder="Write your answer…" />
         {answer.includes("\\(") || answer.includes("\\[") ? <div className="mt-2 border-t border-line pt-3"><span className="text-xs text-muted">Math preview</span><MathText className="mt-1 whitespace-pre-wrap" text={answer} /></div> : null}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="How hard was it?">{ratings.map(option => <ToggleButton key={option.value} pressed={rating === option.value} onClick={() => setRating(option.value)}>{option.label}</ToggleButton>)}</div>
@@ -195,7 +195,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         </div>
       </section>}
     </div>
-    <Chat key={problem.id} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
+    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
   </div>{browseDialog}</>;
 }
 
