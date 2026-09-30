@@ -54,24 +54,25 @@ export async function getStudyChat(target: ChatTarget, id: string, request: Requ
   return Response.json({ messages: await chatMessages(parents[target], id), name: await chatName(target, id) });
 }
 
-// A chat's name: the model's or the student's, empty until either gives one. `clearedAt` picks an archived chat.
-async function chatName(target: ChatTarget, id: string, clearedAt: string | null = null) {
+// The current chat's name: the model's or the student's, empty until either gives one.
+async function chatName(target: ChatTarget, id: string) {
   const result = await query<{ content: string }>(`SELECT content FROM tutor_messages WHERE ${parents[target]} = $1 AND kind = 'title'
-    AND cleared_at IS NOT DISTINCT FROM $2::timestamptz ORDER BY created_at DESC LIMIT 1`, [id, clearedAt]);
+    AND cleared_at IS NULL ORDER BY created_at DESC LIMIT 1`, [id]);
   return result.rows[0]?.content ?? "";
 }
 
-// Earlier conversations set aside by starting a new chat, newest first. `clearedAt` is ISO text with microseconds,
-// so it names the chat exactly when renaming it.
+// Earlier conversations set aside by starting a new chat or switching to another, most recently used first.
+// `clearedAt` is ISO text with microseconds, so it names the chat exactly when switching back to it.
 async function archivedChats(target: ChatTarget, id: string) {
-  const result = await query<{ clearedAt: string; kind: string; role: "user" | "assistant" | "summary"; text: string; diagram: Diagram | null }>(`SELECT to_json(cleared_at) #>> '{}' AS "clearedAt", kind,
+  const result = await query<{ clearedAt: string; lastAt: string; kind: string; role: "user" | "assistant" | "summary"; text: string; diagram: Diagram | null }>(`SELECT
+    to_json(cleared_at) #>> '{}' AS "clearedAt", max(created_at) FILTER (WHERE kind <> 'title') OVER (PARTITION BY cleared_at) AS "lastAt", kind,
     CASE WHEN kind = 'summary' THEN 'summary' WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role, content AS text, diagram
     FROM tutor_messages WHERE ${parents[target]} = $1 AND cleared_at IS NOT NULL AND kind IN ('question', 'hint', 'summary', 'title')
-    ORDER BY cleared_at DESC, created_at, tutor_messages.role`, [id]);
-  const chats: { clearedAt: string; name: string; messages: Omit<(typeof result.rows)[number], "clearedAt" | "kind">[] }[] = [];
-  for (const { clearedAt, kind, ...message } of result.rows) {
+    ORDER BY "lastAt" DESC NULLS LAST, cleared_at, created_at, tutor_messages.role`, [id]);
+  const chats: { clearedAt: string; lastAt: string; name: string; messages: Omit<(typeof result.rows)[number], "clearedAt" | "lastAt" | "kind">[] }[] = [];
+  for (const { clearedAt, lastAt, kind, ...message } of result.rows) {
     let chat = chats.at(-1);
-    if (chat?.clearedAt !== clearedAt) chats.push(chat = { clearedAt, name: "", messages: [] });
+    if (chat?.clearedAt !== clearedAt) chats.push(chat = { clearedAt, lastAt, name: "", messages: [] });
     if (kind === "title") chat.name = message.text;
     else chat.messages.push(message);
   }
@@ -80,20 +81,18 @@ async function archivedChats(target: ChatTarget, id: string) {
 
 const isTimestamp = (value: string) => /^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-][\d:]+)$/.test(value);
 
-// Renames the current chat, or with `clearedAt` an archived one.
+// Renames the current chat.
 export async function renameStudyChat(target: ChatTarget, id: string, request: Request) {
-  let body: { name?: unknown; clearedAt?: unknown };
+  let body: { name?: unknown };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
   if (!name || name.length > 80) return jsonError("Name must be 1–80 characters");
-  const clearedAt = typeof body.clearedAt === "string" ? body.clearedAt : null;
-  if (clearedAt !== null && !isTimestamp(clearedAt)) return jsonError("Chat not found", 404);
   if (!await owned(target, id)) return jsonError(notFound[target], 404);
-  const match = `${parents[target]} = $1 AND cleared_at IS NOT DISTINCT FROM $2::timestamptz`;
-  const exists = await query(`SELECT 1 FROM tutor_messages WHERE ${match} AND kind IN ('question', 'hint') LIMIT 1`, [id, clearedAt]);
+  const match = `${parents[target]} = $1 AND cleared_at IS NULL`;
+  const exists = await query(`SELECT 1 FROM tutor_messages WHERE ${match} AND kind IN ('question', 'hint') LIMIT 1`, [id]);
   if (!exists.rowCount) return jsonError("Chat not found", 404);
-  await query(`DELETE FROM tutor_messages WHERE ${match} AND kind = 'title'`, [id, clearedAt]);
-  await query(`INSERT INTO tutor_messages(${parents[target]}, role, kind, content, cleared_at) VALUES ($1, 'student', 'title', $3, $2::timestamptz)`, [id, clearedAt, name]);
+  await query(`DELETE FROM tutor_messages WHERE ${match} AND kind = 'title'`, [id]);
+  await query(`INSERT INTO tutor_messages(${parents[target]}, role, kind, content) VALUES ($1, 'student', 'title', $2)`, [id, name]);
   return Response.json({ name });
 }
 
@@ -135,7 +134,7 @@ export async function postStudyChat(target: ChatTarget, id: string, request: Req
 }
 
 // Sets the current conversation aside; it stays among the archived chats. With `restore` (an archived chat's
-// `clearedAt`), that chat becomes the current one again so it can be continued.
+// `clearedAt`), that chat becomes the current one again.
 export async function clearStudyChat(target: ChatTarget, id: string, request: Request) {
   const restore = new URL(request.url).searchParams.get("restore");
   if (restore !== null && !isTimestamp(restore)) return jsonError("Chat not found", 404);

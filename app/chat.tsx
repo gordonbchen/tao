@@ -13,17 +13,16 @@ import { Button, Card, cn, ErrorMessage, IconButton, Input, Spinner, Textarea } 
 export type ChatMessage = { role: "assistant" | "user" | "summary"; text: string; diagram?: DiagramData | null };
 // A tutor reply: text, an optional figure, and the chat's new name when the tutor just named it.
 export type ChatReply = { text: string; diagram?: DiagramData | null; name?: string };
-// A conversation set aside by starting a new chat.
-export type PastChat = { clearedAt: string; name: string; messages: ChatMessage[] };
+// A conversation set aside by starting a new chat or switching to another. `clearedAt` identifies it; `lastAt` is its last message.
+export type PastChat = { clearedAt: string; lastAt: string; name: string; messages: ChatMessage[] };
 
 const when = (date: string) => new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 // Tutor conversation for problems, flashcards, topics, folders, and resources. Remount it with a new `key` for each item.
 // `send` returns the tutor's reply. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
-// that message, `summarize` adds a button that condenses the conversation so far, `clear` one that starts a new chat,
-// `history` one that lists earlier chats to read, and `resume` a button that continues the one being read, setting the
-// current chat aside. `rename` makes the chat's name (and earlier chats' names) editable;
-// without `clearedAt` it renames the current chat. `draftKey` keeps the unsent message in this browser as it is typed.
+// that message, `summarize` adds a button that condenses the conversation so far, and `clear` one that starts a new chat.
+// `history` adds a list of all chats; `resume` switches to an earlier one, setting the current chat aside. `rename` makes
+// the chat's name editable. `draftKey` keeps the unsent message in this browser as it is typed.
 export function Chat({ initialMessages = [], initialName = "", draftKey, send, placeholder, empty, hint, summarize, clear, history, resume, rename, className }: {
   initialName?: string;
   draftKey?: string;
@@ -36,20 +35,20 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   clear?: () => Promise<void>;
   history?: () => Promise<PastChat[]>;
   resume?: (clearedAt: string) => Promise<void>;
-  rename?: (name: string, clearedAt?: string) => Promise<void>;
+  rename?: (name: string) => Promise<void>;
   className?: string;
 }) {
   const [messages, setMessages] = useState(initialMessages);
   const [name, setName] = useState(initialName);
-  const [renameError, setRenameError] = useState("");
+  // A failed rename or switch, shown under the top bar.
+  const [barError, setBarError] = useState("");
   // Chats render only in the browser, after their messages load, so the draft can be read on the first render.
   const [text, setTextState] = useState(() => readDraft(draftKey));
   const setText = (value: string) => { setTextState(value); saveDraft(draftKey, value); };
   // What the chat is waiting for, shown beside a spinner; empty when idle.
   const [busy, setBusy] = useState("");
-  // Earlier chats while browsing them, and the one being read.
+  // Earlier chats while the chat list is open.
   const [past, setPast] = useState<PastChat[] | null>(null);
-  const [reading, setReading] = useState<PastChat | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
 
@@ -61,7 +60,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     element.style.height = `${element.scrollHeight + element.offsetHeight - element.clientHeight}px`;
   }, [text]);
 
-  useEffect(() => { log.current?.scrollTo({ top: past && !reading ? 0 : log.current.scrollHeight }); }, [messages, busy, past, reading]);
+  useEffect(() => { log.current?.scrollTo({ top: past ? 0 : log.current.scrollHeight }); }, [messages, busy, past]);
 
   async function ask(content: string) {
     content = content.trim();
@@ -95,33 +94,32 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   };
 
   const showHistory = () => {
-    if (history) void act(async () => { setPast(await history()); }, "Loading earlier chats…", "Earlier chats could not be loaded.");
+    if (history) void act(async () => { setPast(await history()); }, "Loading chats…", "Chats could not be loaded.");
   };
-  // Continues the earlier chat being read, showing a failure under the bar.
-  const continueReading = resume && reading && (async () => {
-    setBusy("Continuing…");
-    try {
-      await resume(reading.clearedAt);
-      setMessages(reading.messages);
-      setName(reading.name);
-      setRenameError("");
-      setReading(null);
+  const newChat = clear && (() => void act(async () => { await clear(); setMessages([]); setName(""); setBarError(""); setPast(null); }, "Starting a new chat…", "A new chat could not be started."));
+  // Opens an earlier chat in place of the current one, which joins the list.
+  const switchTo = (chat: PastChat) => {
+    if (!resume || busy) return;
+    setBusy("Opening the chat…");
+    resume(chat.clearedAt).then(() => {
+      setMessages(chat.messages);
+      setName(chat.name);
+      setBarError("");
       setPast(null);
-    } catch (error) { setRenameError(error instanceof Error ? error.message : "The chat could not be continued."); }
-    finally { setBusy(""); }
-  });
-  // Renames the current chat, or the earlier one being read, showing a failure under the bar.
+    }, (error) => setBarError(error instanceof Error ? error.message : "The chat could not be opened.")).finally(() => setBusy(""));
+  };
   const renameTo = rename && (async (value: string) => {
-    try {
-      await rename(value, reading?.clearedAt);
-      setRenameError("");
-      if (!reading) return setName(value);
-      const renamed = { ...reading, name: value };
-      setReading(renamed);
-      setPast((chats) => chats && chats.map((chat) => chat.clearedAt === renamed.clearedAt ? renamed : chat));
-    } catch (error) { setRenameError(error instanceof Error ? error.message : "The chat could not be renamed."); }
+    try { await rename(value); setName(value); setBarError(""); }
+    catch (error) { setBarError(error instanceof Error ? error.message : "The chat could not be renamed."); }
   });
-  const renameFailure = renameError && <ErrorMessage className="mx-3 my-2">{renameError}</ErrorMessage>;
+  const barFailure = barError && <ErrorMessage className="mx-3 my-2">{barError}</ErrorMessage>;
+  const opening = (list: ChatMessage[]) => list.find((message) => message.role === "user")?.text ?? list[0]?.text ?? "";
+  const chatRow = (key: string, title: string, detail: string, onClick: () => void, current = false) => <li key={key}>
+    <button type="button" className={cn("flex w-full flex-col rounded-md px-2 py-2 text-left transition-colors", current ? "bg-accent-soft" : "hover:bg-hover")} onClick={onClick} disabled={!!busy} aria-current={current || undefined}>
+      <span className="truncate text-sm">{title}</span><span className="text-xs text-muted">{detail}</span>
+    </button>
+  </li>;
+  const newChatButton = newChat && <IconButton size="sm" label="Start a new chat" onClick={newChat} disabled={!!busy || !messages.length}><MessageSquarePlus size={16} /></IconButton>;
 
   const render = (message: ChatMessage, i: number) => message.role === "summary"
     ? <div key={i} className="border-y border-line py-3 text-sm"><p className="mb-1 text-xs text-muted">Summary of the conversation above; the tutor now reads this instead</p><MathText className="leading-relaxed whitespace-pre-wrap" text={message.text} /></div>
@@ -131,31 +129,29 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     </div>;
 
   if (past) return <Card className={cn("flex min-h-80 flex-col", className)}>
-    <div className="flex items-center gap-2 border-b border-line p-1">
-      <IconButton size="sm" label={reading ? "Back to earlier chats" : "Back to the current chat"} onClick={() => { setRenameError(""); if (reading) setReading(null); else setPast(null); }}><ArrowLeft size={16} /></IconButton>
-      {reading ? <ChatName key={reading.clearedAt} name={reading.name} fallback={when(reading.clearedAt)} rename={renameTo} /> : <span className="px-2 text-sm">Earlier chats</span>}
-      {continueReading && <Button variant="secondary" size="sm" onClick={() => void continueReading()} disabled={!!busy}>{busy ? <><Spinner />{busy}</> : "Continue this chat"}</Button>}
+    <div className="flex items-center gap-1 border-b border-line p-1">
+      <IconButton size="sm" label="Back to the chat" onClick={() => { setBarError(""); setPast(null); }}><ArrowLeft size={16} /></IconButton>
+      <span className="flex-1 px-2 text-sm">Chats</span>
+      {newChatButton}
     </div>
-    {renameFailure}
+    {barFailure}
     <div ref={log} className="flex flex-1 flex-col gap-3 overflow-auto p-4">
-      {reading ? reading.messages.map(render)
-        : !past.length ? <p className="text-sm text-muted">No earlier chats. Starting a new chat keeps the old one here.</p>
-        : <ul className="-mx-2 flex flex-col">{past.map((chat) => {
-          const opening = chat.messages.find((message) => message.role === "user")?.text ?? chat.messages[0]?.text ?? "";
-          return <li key={chat.clearedAt}><button type="button" className="flex w-full flex-col rounded-md px-2 py-2 text-left transition-colors hover:bg-hover" onClick={() => setReading(chat)}>
-            <span className="truncate text-sm">{chat.name || opening}</span><span className="text-xs text-muted">{when(chat.clearedAt)} · {chat.messages.length} messages</span>
-          </button></li>;
-        })}</ul>}
+      {busy && <p className="flex items-center gap-2 text-sm text-muted"><Spinner />{busy}</p>}
+      {!messages.length && !past.length ? <p className="text-sm text-muted">No chats yet.</p>
+        : <ul className="-mx-2 flex flex-col">
+          {messages.length > 0 && chatRow("current", name || opening(messages), `Current · ${messages.length} messages`, () => setPast(null), true)}
+          {past.map((chat) => chatRow(chat.clearedAt, chat.name || opening(chat.messages), `${when(chat.lastAt)} · ${chat.messages.length} messages`, () => switchTo(chat)))}
+        </ul>}
     </div>
   </Card>;
 
   return <Card className={cn("flex min-h-80 flex-col", className)}>
     {(history || clear) && <div className="flex items-center gap-1 border-b border-line p-1">
-      <ChatName name={name} fallback="New chat" rename={messages.length ? renameTo : undefined} />
-      {history && <IconButton size="sm" label="Earlier chats" onClick={showHistory} disabled={!!busy}><History size={16} /></IconButton>}
-      {clear && <IconButton size="sm" label="Start a new chat" onClick={() => void act(async () => { await clear(); setMessages([]); setName(""); setRenameError(""); }, "Starting a new chat…", "A new chat could not be started.")} disabled={!!busy || !messages.length}><MessageSquarePlus size={16} /></IconButton>}
+      <ChatName name={name} fallback={opening(messages) || "New chat"} rename={messages.length ? renameTo : undefined} />
+      {history && <IconButton size="sm" label="Chats" onClick={showHistory} disabled={!!busy}><History size={16} /></IconButton>}
+      {newChatButton}
     </div>}
-    {renameFailure}
+    {barFailure}
     <div ref={log} className="flex flex-1 flex-col gap-3 overflow-auto p-4">
       {!messages.length && !busy && <p className="text-sm text-muted">{empty}</p>}
       {messages.map(render)}
@@ -222,6 +218,6 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
   return <Chat className={cn("h-[min(36rem,calc(100dvh-240px))]", className)} initialMessages={chat.messages} initialName={chat.name} draftKey={`chat:${path}`} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
     history={async () => (await api<{ chats: PastChat[] }>(`${path}?archived=1`)).chats}
     resume={(clearedAt) => api<void>(`${path}?restore=${encodeURIComponent(clearedAt)}`, { method: "DELETE" })}
-    rename={async (name, clearedAt) => { await api(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, clearedAt }) }); }}
+    rename={async (name) => { await api(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }}
     placeholder={`Ask about ${name}…`} empty={empty} />;
 }

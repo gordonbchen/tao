@@ -625,7 +625,7 @@ function SubjectContent() {
   const subjectChat = subjectChatOpen && !loading && !!subject;
   return <Page className={subjectChat ? "max-w-7xl" : undefined}>
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
-    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
+    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid grid-cols-[minmax(0,1fr)] gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
       <div>
         <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
           <div className="flex flex-wrap items-center gap-4">
