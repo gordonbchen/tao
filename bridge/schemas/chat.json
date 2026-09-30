@@ -1,0 +1,1 @@
+{"type":"object","properties":{"reply":{"type":"string"},"diagram":{"anyOf":[{"type":"null"},{"type":"object","properties":{"kind":{"type":"string","enum":["mermaid","svg"]},"source":{"type":"string"},"alt":{"type":"string"}},"required":["kind","source","alt"],"additionalProperties":false}]}},"required":["reply","diagram"],"additionalProperties":false}

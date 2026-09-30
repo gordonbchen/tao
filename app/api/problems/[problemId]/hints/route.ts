@@ -18,17 +18,18 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!problem) return jsonError("Problem not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
   if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before asking for hints", 409);
-  const previous = await query<{ content: string }>("SELECT content FROM tutor_messages WHERE problem_id = $1 AND kind = 'hint' ORDER BY created_at", [problemId]);
+  const previous = await query<{ content: string; diagram: Diagram | null }>("SELECT content, diagram FROM tutor_messages WHERE problem_id = $1 AND kind = 'hint' ORDER BY created_at", [problemId]);
   const count = previous.rows.length;
   const hasProvider = hasAiProvider();
   const indexedHint = problem.hints[count];
   if (!indexedHint && !hasProvider) return jsonError("You have used the available hints. Try your answer when you are ready.", 409);
   let hint = indexedHint || "";
+  let diagram: Diagram | null = null;
   if (hasProvider) {
-    try { hint = await suggestHint({ prompt: withFigure(problem.prompt, problem.diagram), solution: withFigure(problem.solution, problem.solutionDiagram, "Solution figure") }, message, previous.rows.map((row) => row.content), aiOptions) || hint; }
+    try { ({ text: hint, diagram } = await suggestHint({ prompt: withFigure(problem.prompt, problem.diagram), solution: withFigure(problem.solution, problem.solutionDiagram, "Solution figure") }, message, previous.rows.map((row) => withFigure(row.content, row.diagram)), aiOptions) ?? { text: hint, diagram }); }
     catch { if (!hint) return jsonError("The tutor could not respond. Check the configured AI provider or try again.", 502); }
   }
   await query("INSERT INTO tutor_messages(problem_id, role, kind, content) VALUES ($1, 'student', 'question', $2)", [problemId, message || "Please give me a small hint."]);
-  await query("INSERT INTO tutor_messages(problem_id, role, kind, content) VALUES ($1, 'tutor', 'hint', $2)", [problemId, hint]);
-  return Response.json({ hint, index: count + 1 });
+  await query("INSERT INTO tutor_messages(problem_id, role, kind, content, diagram) VALUES ($1, 'tutor', 'hint', $2, $3)", [problemId, hint, diagram]);
+  return Response.json({ hint, diagram, index: count + 1 });
 }

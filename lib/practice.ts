@@ -127,8 +127,8 @@ export async function listProblems(subjectId: string, selection: Selection) {
 // The tutor conversation for a problem, card, topic, folder, or resource, oldest first, in the shape the chat shows.
 // A question and its reply share a timestamp, so the student row ('student' < 'tutor') sorts first.
 export async function chatMessages(parent: "problem_id" | "card_id" | "subject_id" | "topic_id" | "group_id" | "resource_id", id: string) {
-  const result = await query<{ role: "user" | "assistant" | "summary"; text: string }>(`SELECT CASE WHEN kind = 'summary' THEN 'summary' WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role,
-    content AS text FROM tutor_messages WHERE ${parent} = $1 AND kind IN ('question', 'hint', 'summary') ORDER BY created_at, tutor_messages.role`, [id]);
+  const result = await query<{ role: "user" | "assistant" | "summary"; text: string; diagram: Diagram | null }>(`SELECT CASE WHEN kind = 'summary' THEN 'summary' WHEN role = 'student' THEN 'user' ELSE 'assistant' END AS role,
+    content AS text, diagram FROM tutor_messages WHERE ${parent} = $1 AND cleared_at IS NULL AND kind IN ('question', 'hint', 'summary') ORDER BY created_at, tutor_messages.role`, [id]);
   return result.rows;
 }
 

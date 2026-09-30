@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DIAGRAM_COLORS, themedSvgUrl, type Diagram as DiagramData } from "@/lib/diagrams";
-import { cn } from "./ui";
+import { Maximize2 } from "lucide-react";
+import { cn, Modal } from "./ui";
 
 // The theme toggle sets data-theme on <html>; diagrams redraw with the new token colors.
 function subscribeTheme(onChange: () => void) {
@@ -20,11 +21,22 @@ function tokenColors(names: readonly string[]) {
 let mermaidCount = 0;
 
 // A generated figure. SVG is shown as an image, so nothing inside it can run; Mermaid renders in strict mode.
-// When a figure cannot be drawn, its description is shown instead.
+// When a figure cannot be drawn, its description is shown instead. Clicking a figure opens it at full screen size.
 export function Diagram({ diagram, className }: { diagram: DiagramData; className?: string }) {
+  const [enlarged, setEnlarged] = useState(false);
+  return <>
+    <button type="button" aria-label={`Enlarge figure: ${diagram.alt}`} title="Enlarge figure" className={cn("group relative block w-full cursor-zoom-in rounded-md", className)} onClick={() => setEnlarged(true)}>
+      <Figure diagram={diagram} />
+      <Maximize2 size={16} aria-hidden className="absolute top-2 right-2 text-muted pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 group-focus-visible:opacity-100" />
+    </button>
+    {enlarged && <Modal title="Figure" subtitle={diagram.alt} wide onClose={() => setEnlarged(false)}><Figure diagram={diagram} large /></Modal>}
+  </>;
+}
+
+function Figure({ diagram, large }: { diagram: DiagramData; large?: boolean }) {
   const theme = useTheme();
   const [failed, setFailed] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLSpanElement>(null);
   const svgUrl = useMemo(() => diagram.kind === "svg" && typeof document !== "undefined" && theme
     ? themedSvgUrl(diagram.source, tokenColors(DIAGRAM_COLORS)) : null, [diagram, theme]);
 
@@ -50,12 +62,12 @@ export function Diagram({ diagram, className }: { diagram: DiagramData; classNam
     return () => { active = false; };
   }, [diagram, theme]);
 
-  if (failed) return <p className={cn("text-sm text-muted", className)}>The figure couldn’t be drawn. It shows: {diagram.alt}</p>;
-  return <figure className={cn("diagram", className)}>
+  if (failed) return <span className="block text-left text-sm text-muted">The figure couldn’t be drawn. It shows: {diagram.alt}</span>;
+  return <span className={cn("diagram block", large && "diagram-large")}>
     {diagram.kind === "svg"
       // A data URL built on the client; next/image has nothing to optimize.
       // eslint-disable-next-line @next/next/no-img-element
       ? svgUrl && <img src={svgUrl} alt={diagram.alt} onError={() => setFailed(true)} />
-      : <div ref={ref} role="img" aria-label={diagram.alt} />}
-  </figure>;
+      : <span ref={ref} role="img" aria-label={diagram.alt} className="block" />}
+  </span>;
 }

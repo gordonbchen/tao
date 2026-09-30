@@ -64,7 +64,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
   // Space or Enter shows the answer; 1–4 rate it, as in Anki. Keys typed in fields and dialogs are left alone.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!card || dialog || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!card || dialog || event.metaKey || event.ctrlKey || event.altKey || document.querySelector("[role='dialog']")) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (target?.closest("input, textarea, select, [contenteditable]")) return;
       if (!revealed && (event.key === " " || event.key === "Enter")) {
@@ -80,8 +80,8 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
   async function askTutor(message: string) {
     if (!card) throw new Error("No card is open.");
     if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to Codex or Claude to continue."); }
-    const result = await api<{ reply: string }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ message, revealed }) });
-    return result.reply;
+    return api<{ reply: string; diagram: DiagramData | null }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ message, revealed }) })
+      .then((result) => ({ text: result.reply, diagram: result.diagram }));
   }
 
   function removeCard(id: string) {

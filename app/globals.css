@@ -152,4 +152,6 @@
 @layer components {
   .diagram { overflow-x: auto; }
   .diagram :where(img, svg) { display: block; margin-inline: auto; max-width: 100%; max-height: 28rem; height: auto; object-fit: contain; }
+  /* Enlarged: as big as the screen allows. Mermaid sets an inline max-width on its svg, hence !important. */
+  .diagram-large :where(img, svg) { width: 100%; max-width: 100% !important; max-height: calc(100dvh - 180px); }
 }

@@ -588,6 +588,8 @@ function SubjectContent() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
       if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
+      // Another dialog, such as an enlarged figure, is open over the viewer.
+      if (document.querySelectorAll("[role='dialog']").length > 1) return;
       if (event.key === "Tab") {
         event.preventDefault();
         const step = event.shiftKey ? -1 : 1;

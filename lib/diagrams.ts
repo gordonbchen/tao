@@ -46,6 +46,11 @@ export function themedSvgUrl(source: string, colors: Record<string, string>) {
 
 const DIAGRAM_RULES = `Use kind mermaid for structure: flowcharts, cycles, sequences, state machines, timelines, mind maps, trees, class or entity diagrams, and simple pie charts. Write valid Mermaid with no init directives, styling, click handlers, or HTML, and write any math in labels as plain Unicode such as θ, x², or ≤. Use kind svg for drawings where position matters: geometry, force diagrams, circuits, graphs of specific points, and labelled sketches. Write one self-contained <svg> element with a viewBox, at most 20,000 characters, with no scripts, images, links, fonts, or external references; label with <text> using plain Unicode math. Work out the geometry before writing coordinates: derive every point from it so objects rest on the surfaces they touch, angles match their labels, and each arrow points in the direction the text states, such as along or perpendicular to a slope. For SVG colors use only ${DIAGRAM_COLORS.join(", ")}, or none, as fill and stroke values; they follow the reader's light or dark theme. Never rely on color alone. alt describes in one to three sentences everything a student needs from the figure, because the tutor only sees alt.`;
 
+// Instructions for a chat reply's optional figure. Chats may always draw, but only when asked or when a figure clearly helps.
+export function chatDiagramInstructions(secret = "") {
+  return `diagram is null unless the student asks for a figure or one would clearly explain better than words, such as a free-body diagram, a process, or a geometric configuration. When you draw one, the reply must still make sense without it. ${secret} ${DIAGRAM_RULES}`;
+}
+
 // Instructions for a generation prompt, depending on the subject's diagram setting.
 export function diagramInstructions(enabled: boolean, fields: string, secret: string) {
   if (!enabled) return `Set ${fields} to null.`;

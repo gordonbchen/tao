@@ -104,8 +104,8 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   async function askTutor(message: string) {
     if (!problem) throw new Error("No problem is open.");
     if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to Codex or Claude to continue."); }
-    const result = await api<{ hint: string }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ message }) });
-    return result.hint;
+    const result = await api<{ hint: string; diagram: DiagramData | null }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ message }) });
+    return { text: result.hint, diagram: result.diagram };
   }
 
   async function submitAttempt(e: React.FormEvent) {
