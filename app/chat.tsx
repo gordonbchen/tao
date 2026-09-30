@@ -21,9 +21,10 @@ const when = (date: string) => new Date(date).toLocaleString(undefined, { dateSt
 // Tutor conversation for problems, flashcards, topics, folders, and resources. Remount it with a new `key` for each item.
 // `send` returns the tutor's reply. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
 // that message, `summarize` adds a button that condenses the conversation so far, `clear` one that starts a new chat,
-// and `history` one that lists earlier chats to read. `rename` makes the chat's name (and earlier chats' names) editable;
+// `history` one that lists earlier chats to read, and `resume` a button that continues the one being read, setting the
+// current chat aside. `rename` makes the chat's name (and earlier chats' names) editable;
 // without `clearedAt` it renames the current chat. `draftKey` keeps the unsent message in this browser as it is typed.
-export function Chat({ initialMessages = [], initialName = "", draftKey, send, placeholder, empty, hint, summarize, clear, history, rename, className }: {
+export function Chat({ initialMessages = [], initialName = "", draftKey, send, placeholder, empty, hint, summarize, clear, history, resume, rename, className }: {
   initialName?: string;
   draftKey?: string;
   initialMessages?: ChatMessage[];
@@ -34,6 +35,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   summarize?: () => Promise<string>;
   clear?: () => Promise<void>;
   history?: () => Promise<PastChat[]>;
+  resume?: (clearedAt: string) => Promise<void>;
   rename?: (name: string, clearedAt?: string) => Promise<void>;
   className?: string;
 }) {
@@ -95,6 +97,19 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   const showHistory = () => {
     if (history) void act(async () => { setPast(await history()); }, "Loading earlier chats…", "Earlier chats could not be loaded.");
   };
+  // Continues the earlier chat being read, showing a failure under the bar.
+  const continueReading = resume && reading && (async () => {
+    setBusy("Continuing…");
+    try {
+      await resume(reading.clearedAt);
+      setMessages(reading.messages);
+      setName(reading.name);
+      setRenameError("");
+      setReading(null);
+      setPast(null);
+    } catch (error) { setRenameError(error instanceof Error ? error.message : "The chat could not be continued."); }
+    finally { setBusy(""); }
+  });
   // Renames the current chat, or the earlier one being read, showing a failure under the bar.
   const renameTo = rename && (async (value: string) => {
     try {
@@ -119,6 +134,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     <div className="flex items-center gap-2 border-b border-line p-1">
       <IconButton size="sm" label={reading ? "Back to earlier chats" : "Back to the current chat"} onClick={() => { setRenameError(""); if (reading) setReading(null); else setPast(null); }}><ArrowLeft size={16} /></IconButton>
       {reading ? <ChatName key={reading.clearedAt} name={reading.name} fallback={when(reading.clearedAt)} rename={renameTo} /> : <span className="px-2 text-sm">Earlier chats</span>}
+      {continueReading && <Button variant="secondary" size="sm" onClick={() => void continueReading()} disabled={!!busy}>{busy ? <><Spinner />{busy}</> : "Continue this chat"}</Button>}
     </div>
     {renameFailure}
     <div ref={log} className="flex flex-1 flex-col gap-3 overflow-auto p-4">
@@ -205,6 +221,7 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
   if (!chat) return <p className="flex items-center gap-2 text-sm text-muted"><Spinner />Loading the chat…</p>;
   return <Chat className={cn("h-[min(36rem,calc(100dvh-240px))]", className)} initialMessages={chat.messages} initialName={chat.name} draftKey={`chat:${path}`} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
     history={async () => (await api<{ chats: PastChat[] }>(`${path}?archived=1`)).chats}
+    resume={(clearedAt) => api<void>(`${path}?restore=${encodeURIComponent(clearedAt)}`, { method: "DELETE" })}
     rename={async (name, clearedAt) => { await api(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, clearedAt }) }); }}
     placeholder={`Ask about ${name}…`} empty={empty} />;
 }

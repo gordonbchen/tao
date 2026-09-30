@@ -640,13 +640,13 @@ function SubjectContent() {
         {error && <ErrorMessage>{error}</ErrorMessage>}
       </div>
 
-      {/* In place of topics and resources on narrow screens; beside them, and in view while the page scrolls, on wide ones. */}
-      {subjectChat && <div className="self-start max-lg:w-full lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+      {/* Above topics and resources on narrow screens; beside them, and in view while the page scrolls, on wide ones. */}
+      {subjectChat && <div className="self-start max-lg:mb-12 max-lg:w-full lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
         <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} className="max-lg:h-[calc(100dvh-18rem)] lg:h-[min(40rem,calc(100dvh-14rem))]"
           empty="Ask about your progress, weakest topics, or what to study next, or about the course material." />
       </div>}
 
-      <div className={cn(subjectChat && "max-lg:hidden")}>
+      <div>
         <section className="mb-12">
           <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
             <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">

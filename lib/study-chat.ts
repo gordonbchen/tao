@@ -78,6 +78,8 @@ async function archivedChats(target: ChatTarget, id: string) {
   return chats.filter((chat) => chat.messages.length);
 }
 
+const isTimestamp = (value: string) => /^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-][\d:]+)$/.test(value);
+
 // Renames the current chat, or with `clearedAt` an archived one.
 export async function renameStudyChat(target: ChatTarget, id: string, request: Request) {
   let body: { name?: unknown; clearedAt?: unknown };
@@ -85,7 +87,7 @@ export async function renameStudyChat(target: ChatTarget, id: string, request: R
   const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
   if (!name || name.length > 80) return jsonError("Name must be 1–80 characters");
   const clearedAt = typeof body.clearedAt === "string" ? body.clearedAt : null;
-  if (clearedAt !== null && !/^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-][\d:]+)$/.test(clearedAt)) return jsonError("Chat not found", 404);
+  if (clearedAt !== null && !isTimestamp(clearedAt)) return jsonError("Chat not found", 404);
   if (!await owned(target, id)) return jsonError(notFound[target], 404);
   const match = `${parents[target]} = $1 AND cleared_at IS NOT DISTINCT FROM $2::timestamptz`;
   const exists = await query(`SELECT 1 FROM tutor_messages WHERE ${match} AND kind IN ('question', 'hint') LIMIT 1`, [id, clearedAt]);
@@ -132,9 +134,20 @@ export async function postStudyChat(target: ChatTarget, id: string, request: Req
   return Response.json({ reply: reply.text, diagram: reply.diagram, name });
 }
 
-// Sets the current conversation aside; it stays readable among the archived chats.
-export async function clearStudyChat(target: ChatTarget, id: string) {
+// Sets the current conversation aside; it stays among the archived chats. With `restore` (an archived chat's
+// `clearedAt`), that chat becomes the current one again so it can be continued.
+export async function clearStudyChat(target: ChatTarget, id: string, request: Request) {
+  const restore = new URL(request.url).searchParams.get("restore");
+  if (restore !== null && !isTimestamp(restore)) return jsonError("Chat not found", 404);
   if (!await owned(target, id)) return jsonError(notFound[target], 404);
-  await query(`UPDATE tutor_messages SET cleared_at = now() WHERE ${parents[target]} = $1 AND cleared_at IS NULL`, [id]);
+  if (restore === null) {
+    await query(`UPDATE tutor_messages SET cleared_at = now() WHERE ${parents[target]} = $1 AND cleared_at IS NULL`, [id]);
+    return new Response(null, { status: 204 });
+  }
+  const exists = await query(`SELECT 1 FROM tutor_messages WHERE ${parents[target]} = $1 AND cleared_at = $2::timestamptz AND kind IN ('question', 'hint') LIMIT 1`, [id, restore]);
+  if (!exists.rowCount) return jsonError("Chat not found", 404);
+  // One statement, so the two chats swap together.
+  await query(`UPDATE tutor_messages SET cleared_at = CASE WHEN cleared_at IS NULL THEN now() END
+    WHERE ${parents[target]} = $1 AND (cleared_at IS NULL OR cleared_at = $2::timestamptz)`, [id, restore]);
   return new Response(null, { status: 204 });
 }

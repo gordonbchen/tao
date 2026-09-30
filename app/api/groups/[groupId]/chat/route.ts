@@ -4,5 +4,5 @@ type RouteContext = { params: Promise<{ groupId: string }> };
 
 export async function GET(request: Request, { params }: RouteContext) { return getStudyChat("group", (await params).groupId, request); }
 export async function POST(request: Request, { params }: RouteContext) { return postStudyChat("group", (await params).groupId, request); }
-export async function DELETE(_request: Request, { params }: RouteContext) { return clearStudyChat("group", (await params).groupId); }
+export async function DELETE(request: Request, { params }: RouteContext) { return clearStudyChat("group", (await params).groupId, request); }
 export async function PATCH(request: Request, { params }: RouteContext) { return renameStudyChat("group", (await params).groupId, request); }
