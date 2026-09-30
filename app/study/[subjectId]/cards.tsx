@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, List as ListIcon, Pencil, Plus, Sparkles, Upload } from "lucide-react";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { buildTree, flattenTree, groupPath, type TreeGroup, type TreeTopic } from "@/lib/topic-tree";
-import { api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDelete, useAISettings } from "../../components";
+import { aiApi, api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDelete, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
@@ -22,6 +22,9 @@ type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit
 const ratingLabels: { value: Rating; label: string }[] = [{ value: 1, label: "Again" }, { value: 2, label: "Hard" }, { value: 3, label: "Good" }, { value: 4, label: "Easy" }];
 
 const DIAGRAMS_KEY = "tao-card-diagrams";
+const DENSITY_KEY = "tao-card-density";
+const densities = { brief: "Brief: one small fact, a few-word answer", standard: "Standard: one idea, a short answer", detailed: "Detailed: connected ideas, a fuller answer" };
+type Density = keyof typeof densities;
 
 const jsonHeaders = () => ({ ...getAiRequestHeaders(), "Content-Type": "application/json" });
 
@@ -80,10 +83,10 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [card, dialog, rate, revealed]);
 
-  async function askTutor(message: string) {
+  async function askTutor(message: string, signal: AbortSignal) {
     if (!card) throw new Error("No card is open.");
     if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to continue."); }
-    return api<{ reply: string; diagram: DiagramData | null }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ message, revealed }) })
+    return aiApi<{ reply: string; diagram: DiagramData | null }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, revealed }), signal })
       .then((result) => ({ text: result.reply, diagram: result.diagram }));
   }
 
@@ -311,65 +314,97 @@ function ImportDialog({ subjectId, topics, groups, topicId: initialTopicId, onCl
   </Modal>;
 }
 
-// Drafts cards for each topic the selection covers, a few topics at a time, then saves the kept ones under their topics.
+// Drafts cards for each topic the selection covers, a few topics at a time, showing each topic's drafts as they arrive,
+// then saves the kept ones under their topics. Closing the dialog, Back, or Stop cancels the topics still being written.
 function GenerateDialog({ subjectId, topics, groups, selection: initialSelection, onClose }: { subjectId: string; topics: TreeTopic[]; groups: TreeGroup[]; selection: StudySelection; onClose: (changed: boolean) => void }) {
   const [selection, setSelection] = useState(initialSelection);
   const [choosing, setChoosing] = useState(false);
   const [count, setCount] = useState<number | "auto">("auto");
   // Whether the model should draw figures on the cards; remembered in this browser.
   const [diagrams, setDiagrams] = useState(() => { try { return localStorage.getItem(DIAGRAMS_KEY) === "true"; } catch { return false; } });
+  // How much each card holds; remembered in this browser.
+  const [density, setDensity] = useState<Density>(() => {
+    try { const stored = localStorage.getItem(DENSITY_KEY); return stored && stored in densities ? stored as Density : "standard"; } catch { return "standard"; }
+  });
   const [result, setResult] = useState<{ cards: GeneratedDraft[]; metadata: object } | null>(null);
-  const [kept, setKept] = useState<Set<number>>(new Set());
+  // Cards the student unchecked; new drafts start checked.
+  const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const chosen = selectedTopics(selection, topics, groups);
+  // Aborting it cancels the topics still being written, which also stops the model.
+  const generation = useRef<AbortController | null>(null);
+  useEffect(() => () => generation.current?.abort(), []);
 
+  function stop() {
+    generation.current?.abort();
+    generation.current = null;
+    setProgress(null);
+    setStopped(true);
+  }
+
+  // Shows each topic's drafts as soon as they arrive, while up to three topics are written at once.
   async function generate() {
     if (!chosen.length) return;
-    setBusy(true); setError(""); setProgress({ done: 0, total: chosen.length });
-    const drafts: GeneratedDraft[][] = [];
-    let metadata: object = {};
+    const controller = new AbortController();
+    generation.current = controller;
+    setError(""); setStopped(false); setDropped(new Set());
+    setResult({ cards: [], metadata: {} });
+    setProgress({ done: 0, total: chosen.length });
     let failure = "";
     let next = 0;
     const worker = async () => {
-      for (let index = next++; index < chosen.length; index = next++) {
+      for (let index = next++; index < chosen.length && !controller.signal.aborted; index = next++) {
         const topic = chosen[index];
         try {
-          const generated = await api<{ cards: Draft[]; metadata: object }>(`/api/subjects/${subjectId}/cards/generate`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ topicId: topic.id, count, diagrams }) });
-          drafts[index] = generated.cards.map((card) => ({ ...card, topicId: topic.id, topicName: topic.name }));
-          metadata = generated.metadata;
-        } catch (e) { failure = `${topic.name}: ${e instanceof Error ? e.message : "Could not generate cards"}`; }
+          const generated = await aiApi<{ cards: Draft[]; metadata: object }>(`/api/subjects/${subjectId}/cards/generate`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topicId: topic.id, count, diagrams, density }), signal: controller.signal,
+          });
+          const drafts = generated.cards.map((card) => ({ ...card, topicId: topic.id, topicName: topic.name }));
+          setResult((current) => current && { cards: [...current.cards, ...drafts], metadata: generated.metadata });
+        } catch (e) {
+          if (!controller.signal.aborted) failure = `${topic.name}: ${e instanceof Error ? e.message : "Could not generate cards"}`;
+        }
         setProgress((current) => current && { ...current, done: current.done + 1 });
       }
     };
     await Promise.all(Array.from({ length: Math.min(3, chosen.length) }, worker));
-    const cards = drafts.flat().filter(Boolean);
+    if (generation.current !== controller) return;
+    generation.current = null;
+    setProgress(null);
     if (failure) setError(failure);
-    if (!failure || cards.length) { setResult({ cards, metadata }); setKept(new Set(cards.map((_, index) => index))); }
-    setBusy(false); setProgress(null);
   }
 
   async function save() {
     if (!result) return;
-    setBusy(true); setError("");
+    setSaving(true); setError("");
     const byTopic = new Map<string, Draft[]>();
-    result.cards.forEach((card, index) => { if (kept.has(index)) byTopic.set(card.topicId, [...(byTopic.get(card.topicId) ?? []), card]); });
+    result.cards.forEach((card, index) => { if (!dropped.has(index)) byTopic.set(card.topicId, [...(byTopic.get(card.topicId) ?? []), card]); });
     try {
       for (const [topicId, cards] of byTopic) await saveDrafts(subjectId, cards, topicId, "ai", result.metadata);
       onClose(true);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not save these cards"); setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save these cards"); setSaving(false); }
   }
 
   const several = chosen.length > 1;
+  const keptCount = (result?.cards.length ?? 0) - dropped.size;
   return <Modal title="Generate cards" subtitle={result ? "Uncheck any card you don’t want to keep." : "From each topic’s coverage summary and linked resources."} onClose={() => onClose(false)} wide={Boolean(result)}>
     {!result ? <div className="flex flex-col gap-4">
-      <Field label="Topics"><Button className="w-full justify-between" onClick={() => setChoosing(true)} disabled={busy}>
+      <Field label="Topics"><Button className="w-full justify-between" onClick={() => setChoosing(true)}>
         <span className="truncate">{selectionLabel(selection, topics, groups)}</span><ChevronDown size={16} className="flex-none" />
       </Button></Field>
       <Field label={several ? "How many per topic" : "How many"}><Select value={count} onChange={(event) => setCount(event.target.value === "auto" ? "auto" : Number(event.target.value))}>
         <option value="auto">Auto: as many as the material needs</option>
-        {[5, 10, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}
+        {Array.from({ length: 30 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value}</option>)}
+      </Select></Field>
+      <Field label="Card density"><Select value={density} onChange={(event) => {
+        const value = event.target.value as Density;
+        setDensity(value);
+        try { localStorage.setItem(DENSITY_KEY, value); } catch { /* Keep it for this dialog only. */ }
+      }}>
+        {Object.entries(densities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </Select></Field>
       <label className="flex cursor-pointer items-center gap-2 text-sm" title="Mermaid for structure such as processes and timelines, SVG for drawings such as geometry. Generated figures can be wrong.">
         <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => {
@@ -381,18 +416,21 @@ function GenerateDialog({ subjectId, topics, groups, selection: initialSelection
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
         <Button onClick={() => onClose(false)}>Cancel</Button>
-        <Button variant="primary" disabled={!chosen.length || busy} onClick={() => void generate()}>{busy
-          ? <><Spinner />{progress && progress.total > 1 ? `Writing cards… ${progress.done} of ${progress.total} topics` : "Writing cards…"}</>
-          : several ? `Generate for ${chosen.length} topics` : "Generate"}</Button>
+        <Button variant="primary" disabled={!chosen.length} onClick={() => void generate()}>{several ? `Generate for ${chosen.length} topics` : "Generate"}</Button>
       </div>
       {choosing && <SelectionDialog value={selection} topics={topics} groups={groups} applyLabel="Use selected" onClose={() => setChoosing(false)} onApply={(next) => { setChoosing(false); setSelection(next); }} />}
     </div> : <div className="flex flex-col gap-4">
-      {!result.cards.length ? <p className="text-muted">Your existing cards already cover {several ? "these topics" : "this topic"}.</p>
-        : <DraftList drafts={result.cards} showTopics={several} kept={kept} onToggle={(index) => setKept((current) => { const next = new Set(current); if (!next.delete(index)) next.add(index); return next; })} />}
+      {progress && <div className="flex items-center gap-2 text-sm text-muted">
+        <Spinner />{progress.total > 1 ? `Writing cards… ${progress.done} of ${progress.total} topics` : "Writing cards…"}
+        <Button size="sm" variant="ghost" className="ml-auto" onClick={stop}>Stop</Button>
+      </div>}
+      {result.cards.length > 0 ? <DraftList drafts={result.cards} showTopics={several} kept={new Set(result.cards.flatMap((_, index) => dropped.has(index) ? [] : [index]))}
+        onToggle={(index) => setDropped((current) => { const next = new Set(current); if (!next.delete(index)) next.add(index); return next; })} />
+        : !progress && !error && <p className="text-muted">{stopped ? "Stopped before any cards were written." : `Your existing cards already cover ${several ? "these topics" : "this topic"}.`}</p>}
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       <div className="flex justify-end gap-2">
-        <Button onClick={() => { setResult(null); setError(""); }} disabled={busy}>Back</Button>
-        <Button variant="primary" onClick={() => void save()} disabled={busy || !kept.size}>{busy ? <><Spinner />Saving…</> : `Keep ${kept.size} cards`}</Button>
+        <Button onClick={() => { stop(); setResult(null); setError(""); }} disabled={saving}>Back</Button>
+        <Button variant="primary" onClick={() => void save()} disabled={Boolean(progress) || saving || !keptCount}>{saving ? <><Spinner />Saving…</> : `Keep ${keptCount} cards`}</Button>
       </div>
     </div>}
   </Modal>;

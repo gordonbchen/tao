@@ -20,17 +20,18 @@ export async function GET(_request: Request, { params }: RouteContext) {
 export async function POST(request: Request, { params }: RouteContext) {
   const { resourceId } = await params;
   if (!isUuid(resourceId)) return jsonError("Resource not found", 404);
-  const result = await query<{ filename: string; extractedText: string }>(
-    `SELECT filename, extracted_text AS "extractedText" FROM resources WHERE id = $1 AND owner_id = $2`,
+  const result = await query<{ filename: string; extractedText: string; summaryStatus: string }>(
+    `SELECT filename, extracted_text AS "extractedText", summary_status AS "summaryStatus" FROM resources WHERE id = $1 AND owner_id = $2`,
     [resourceId, LOCAL_OWNER_ID],
   );
   const resource = result.rows[0];
   if (!resource) return jsonError("Resource not found", 404);
   if (!resource.extractedText.trim()) return jsonError("This resource has no selectable text to summarize.", 422);
 
+  const aiOptions = aiOptionsFromRequest(request);
   try {
     await query(`UPDATE resources SET summary_status = 'pending' WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID]);
-    const generated = await summarizeResource(resource.filename, resource.extractedText, aiOptionsFromRequest(request));
+    const generated = await summarizeResource(resource.filename, resource.extractedText, aiOptions);
     const saved = await query(`UPDATE resources SET model_summary = $3, summary_status = 'complete', summary_provider = $4,
       summary_model = $5, brief = $6 WHERE id = $1 AND owner_id = $2
       RETURNING id, filename, extracted_text AS "extractedText", extraction_status AS "extractionStatus",
@@ -39,7 +40,9 @@ export async function POST(request: Request, { params }: RouteContext) {
     return saved.rows[0] ? Response.json(saved.rows[0]) : jsonError("Resource not found", 404);
   } catch (error) {
     const noProvider = isAiSetupError(error instanceof Error ? error.message : "");
-    await query(`UPDATE resources SET summary_status = $3 WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID, noProvider ? "not_generated" : "failed"]);
+    // A cancelled summary leaves the resource as it was.
+    const status = aiOptions.signal?.aborted ? resource.summaryStatus : noProvider ? "not_generated" : "failed";
+    await query(`UPDATE resources SET summary_status = $3 WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID, status]);
     return aiErrorResponse(error, "create a resource summary");
   }
 }

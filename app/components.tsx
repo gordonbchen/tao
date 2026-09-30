@@ -52,6 +52,32 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+// An AI request the student can stop: aborting `init.signal` also stops the model on the server. Sends the selected model.
+export async function aiApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const id = requestId();
+  const cancel = () => void fetch(`/api/ai/requests/${id}`, { method: "DELETE" }).catch(() => undefined);
+  init.signal?.addEventListener("abort", cancel, { once: true });
+  const headers = new Headers(init.headers);
+  headers.set("X-Tao-AI-Model", requestModel);
+  headers.set("X-Tao-Request-Id", id);
+  try { return await api<T>(path, { ...init, headers }); }
+  finally { init.signal?.removeEventListener("abort", cancel); }
+}
+
+// Whether a request failed because the student stopped it.
+export function isAbort(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+// A version 4 UUID. crypto.randomUUID needs a secure context, which a LAN address over HTTP is not.
+function requestId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 type UndoState = { message: string; undo: () => void; commit: () => Promise<void>; restore: () => void };
 let pendingUndo: { id: string; state: UndoState; timer: ReturnType<typeof setTimeout> } | null = null;
 const undoListeners = new Set<(state: UndoState | null) => void>();

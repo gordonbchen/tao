@@ -20,12 +20,13 @@ const auth = createAuth({
   needsCode: true,
 });
 
-function infer(kind, system, input, requestedModel) {
+// Aborting `signal` kills the CLI, so a cancelled request stops using the model.
+function infer(kind, system, input, requestedModel, signal) {
   return new Promise((resolve, reject) => {
     const schema = readFileSync(`/bridge/schemas/${kind}.json`, "utf8");
     const model = requestedModel || process.env.CLAUDE_MODEL || models[0];
     const args = ["-p", "--output-format", "json", "--json-schema", schema, "--tools", "", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config", "--model", model, "--system-prompt", system];
-    const child = spawn("claude", args, { cwd: "/tmp", stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("claude", args, { cwd: "/tmp", stdio: ["pipe", "pipe", "pipe"], signal });
     let output = "";
     let errors = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), 180_000);
@@ -111,7 +112,10 @@ createServer(async (request, response) => {
     const { kind, system, input, model: requestedModel } = JSON.parse(raw);
     if (!kinds.has(kind) || typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
     if (requestedModel !== undefined && !models.includes(requestedModel)) throw new Error("Unsupported Claude model");
-    const value = await infer(kind, system, input, requestedModel);
+    // The app closes the connection when the student cancels.
+    const cancelled = new AbortController();
+    response.on("close", () => cancelled.abort());
+    const value = await infer(kind, system, input, requestedModel, cancelled.signal);
     response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
   } catch (error) {
     response.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: error instanceof Error ? error.message : "Claude request failed" }));

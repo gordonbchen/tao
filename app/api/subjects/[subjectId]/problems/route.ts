@@ -54,7 +54,8 @@ export async function POST(request: Request, { params }: RouteContext) {
     if (!problem) throw new Error("A problem served at once is always stored");
     // Prepare the next problem for the same selection while the student works on this one; across topics, prefer a different one.
     const singleTopic = selection.topicIds.length === 1 && !selection.groupIds.length;
-    after(() => prepareReadyProblem(subjectId, aiOptions, selection, singleTopic ? undefined : problem.topicId));
+    // Stopping this request does not stop that preparation.
+    after(() => prepareReadyProblem(subjectId, { ...aiOptions, signal: undefined }, selection, singleTopic ? undefined : problem.topicId));
     return Response.json({ problem }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error && error.message.startsWith("The tutor repeated") ? error.message : "The tutor could not generate a problem. Check the configured AI provider or try again.";

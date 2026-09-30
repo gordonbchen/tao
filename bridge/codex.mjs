@@ -19,12 +19,13 @@ const auth = createAuth({
   },
 });
 
-function infer(kind, system, input, requestedModel) {
+// Aborting `signal` kills the CLI, so a cancelled request stops using the model.
+function infer(kind, system, input, requestedModel, signal) {
   return new Promise((resolve, reject) => {
     const args = ["exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--ignore-user-config", "--output-schema", `/bridge/schemas/${kind}.json`, "-"];
     const model = requestedModel || process.env.CODEX_MODEL;
     if (model) args.splice(1, 0, "--model", model);
-    const child = spawn("codex", args, { cwd: "/tmp", stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("codex", args, { cwd: "/tmp", stdio: ["pipe", "pipe", "pipe"], signal });
     let output = "";
     let errors = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), 180_000);
@@ -127,7 +128,10 @@ createServer(async (request, response) => {
     if (!kinds.has(kind)) throw new Error("Invalid request");
     if (typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
     if (requestedModel !== undefined && !["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"].includes(requestedModel)) throw new Error("Unsupported Codex model");
-    const value = await infer(kind, system, input, requestedModel);
+    // The app closes the connection when the student cancels.
+    const cancelled = new AbortController();
+    response.on("close", () => cancelled.abort());
+    const value = await infer(kind, system, input, requestedModel, cancelled.signal);
     response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
   } catch (error) {
     response.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: error instanceof Error ? error.message : "Codex request failed" }));

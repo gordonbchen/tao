@@ -2,11 +2,37 @@ export type Difficulty = "easy" | "okay" | "hard";
 export type Rating = Difficulty | "could_not_solve";
 export type Correctness = "correct" | "partial" | "incorrect" | "uncertain";
 export type AiProvider = "codex" | "claude" | "opencode";
-export type AiOptions = { model?: string };
+// `signal` stops the model when it aborts, such as when the student cancels.
+export type AiOptions = { model?: string; signal?: AbortSignal };
 
+// With an `x-tao-request-id` header, the request can be stopped with `cancelAiRequest`. A dropped connection does not
+// stop it, so a reply or summary still finishes and is saved when the page reloads.
 export function aiOptionsFromRequest(request: Request): AiOptions {
-  const model = request.headers.get("x-tao-ai-model")?.trim();
-  return { model: model || undefined };
+  const model = request.headers.get("x-tao-ai-model")?.trim() || undefined;
+  const id = request.headers.get("x-tao-request-id");
+  if (!id || !isUuid(id)) return { model };
+  // A cancel that arrived first left an aborted controller here.
+  const controller = cancellable.get(id) ?? new AbortController();
+  cancellable.set(id, controller);
+  setTimeout(() => cancellable.delete(id), 15 * 60_000).unref();
+  return { model, signal: controller.signal };
+}
+
+// Route modules may be bundled separately, so the running requests live on globalThis.
+const cancellable: Map<string, AbortController> = ((globalThis as { taoAiRequests?: Map<string, AbortController> }).taoAiRequests ??= new Map());
+
+// Also stops the request when the page drops its connection.
+export function withDisconnect(options: AiOptions, request: Request): AiOptions {
+  return { ...options, signal: options.signal ? AbortSignal.any([options.signal, request.signal]) : request.signal };
+}
+
+export function cancelAiRequest(id: string) {
+  const controller = cancellable.get(id);
+  if (controller) { controller.abort(); return; }
+  const early = new AbortController();
+  early.abort();
+  cancellable.set(id, early);
+  setTimeout(() => cancellable.delete(id), 60_000).unref();
 }
 
 export type GeneratedProblem = {
@@ -63,11 +89,11 @@ function selectedModel(requested?: string): { provider: AiProvider; model: strin
   return { provider, model: defaultModelFor(provider) };
 }
 
-// Sends one JSON request to a sidecar over its Unix socket.
-export function callBridge<T>(provider: AiProvider, method: "GET" | "POST", path: string, body?: unknown, timeout = 190_000): Promise<T> {
+// Sends one JSON request to a sidecar over its Unix socket. Aborting `signal` closes it, which stops the sidecar's model call.
+export function callBridge<T>(provider: AiProvider, method: "GET" | "POST", path: string, body?: unknown, timeout = 190_000, signal?: AbortSignal): Promise<T> {
   const { label } = AI_PROVIDERS[provider];
   return new Promise((resolve, reject) => {
-    const request = httpRequest({ socketPath: AI_PROVIDERS[provider].socket, path, method, headers: { "Content-Type": "application/json" }, timeout }, response => {
+    const request = httpRequest({ socketPath: AI_PROVIDERS[provider].socket, path, method, headers: { "Content-Type": "application/json" }, timeout, signal }, response => {
       let text = "";
       response.setEncoding("utf8");
       response.on("data", chunk => { text += chunk; if (text.length > 400_000) request.destroy(new Error(`${label} response too large`)); });
@@ -80,7 +106,7 @@ export function callBridge<T>(provider: AiProvider, method: "GET" | "POST", path
       });
     });
     request.on("timeout", () => request.destroy(new Error(`${label} request timed out`)));
-    request.on("error", error => reject(error.message.includes(label) ? error : new Error(unavailableMessage(provider))));
+    request.on("error", error => reject(signal?.aborted ? new Error("Request cancelled") : error.message.includes(label) ? error : new Error(unavailableMessage(provider))));
     request.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
@@ -95,7 +121,7 @@ const PLAIN_MATH_TEXT = "Write plain text without Markdown: no asterisks, headin
 async function jsonFromConfiguredProvider<T>(system: string, input: string, kind: string, options: AiOptions = {}): Promise<{ value: T; provider: AiProvider; model: string }> {
   const { provider, model } = selectedModel(options.model);
   if (!existsSync(AI_PROVIDERS[provider].socket)) throw new Error(unavailableMessage(provider));
-  const value = await callBridge<T>(provider, "POST", "/infer", { kind, system, input, model });
+  const value = await callBridge<T>(provider, "POST", "/infer", { kind, system, input, model }, undefined, options.signal);
   return { value: undoDoubleEscapingDeep(value), provider, model };
 }
 
@@ -136,10 +162,20 @@ export async function suggestHint(problem: { prompt: string; solution: string },
     { problem: problem.prompt, solution: problem.solution, earlierHints: previousHints, studentMessage }, 1200, options);
 }
 
+export const CARD_DENSITIES = ["brief", "standard", "detailed"] as const;
+export type CardDensity = typeof CARD_DENSITIES[number];
+
+// How much each card asks for and how long its back runs.
+const cardDensityInstructions: Record<CardDensity, string> = {
+  brief: "Keep every card minimal: the front asks for exactly one small fact, term, or symbol, and the back is a few words or a single formula, with no justification.",
+  standard: "Each card tests one fact, definition, statement, or short reasoning step that the materials support. The back is brief enough to check at a glance, with a one-line justification when it helps.",
+  detailed: "Each card tests a connected idea: a theorem with its conditions, a method with its steps, or how related concepts differ. The back gives the full answer in two to five sentences or steps, with the reasoning that ties it together.",
+};
+
 // Without a count, the model writes as many cards as the material needs, which may be none when existing cards cover it.
-export async function generateCards(context: { subject: string; topic: string; coverageSummary: string; excerpts: string[]; existingFronts: string[]; count?: number }, options: AiOptions = {}, diagrams = false) {
+export async function generateCards(context: { subject: string; topic: string; coverageSummary: string; excerpts: string[]; existingFronts: string[]; count?: number }, options: AiOptions = {}, diagrams = false, density: CardDensity = "standard") {
   const { value, provider, model } = await jsonFromConfiguredProvider<{ cards?: unknown }>(
-    `Write spaced-repetition flashcards for a student's course topic, using only the supplied topic coverage and source passages. Each card tests one fact, definition, statement, or short reasoning step that the materials support. The front is a specific question or prompt that has one clear answer; the back is that answer, brief enough to check at a glance, with a one-line justification when it helps. Prefer understanding over trivia, and do not duplicate or trivially reword any existing front. ${context.count ? "Write about the requested count of cards." : "No count is given: write exactly as many cards as it takes to cover every examinable idea in the materials that the existing cards miss, one card per idea. Do not pad with trivia or near-duplicates to reach a number, and do not merge distinct ideas or skip any to keep the list short. If the existing cards already cover everything, return an empty array."} Return JSON with cards, an array of objects with front and back strings and frontDiagram and backDiagram. ${PLAIN_MATH_TEXT} ${diagramInstructions(diagrams ? "asked" : "none", "frontDiagram and backDiagram", "A front diagram must not show or label the answer on the back; when a figure would give it away, put it only on the back.")}`,
+    `Write spaced-repetition flashcards for a student's course topic, using only the supplied topic coverage and source passages. The front is a specific question or prompt that has one clear answer, and the back is that answer. ${cardDensityInstructions[density]} Prefer understanding over trivia, and do not duplicate or trivially reword any existing front. ${context.count ? "Write about the requested count of cards." : "No count is given: write exactly as many cards as it takes to cover every examinable idea in the materials that the existing cards miss, one card per idea. Do not pad with trivia or near-duplicates to reach a number, and do not merge distinct ideas or skip any to keep the list short. If the existing cards already cover everything, return an empty array."} Return JSON with cards, an array of objects with front and back strings and frontDiagram and backDiagram. ${PLAIN_MATH_TEXT} ${diagramInstructions(diagrams ? "asked" : "none", "frontDiagram and backDiagram", "A front diagram must not show or label the answer on the back; when a figure would give it away, put it only on the back.")}`,
     JSON.stringify(context), "flashcards", options);
   const cards = Array.isArray(value.cards) ? value.cards.filter((card): card is { front: string; back: string; frontDiagram?: unknown; backDiagram?: unknown } => typeof card?.front === "string" && typeof card?.back === "string") : [];
   if (!cards.length && context.count) throw new Error("AI returned no flashcards");
@@ -175,13 +211,14 @@ export async function generateStructuredText(kind: "resource_summary" | "topic_s
 }
 import { request as httpRequest } from "node:http";
 import { existsSync } from "node:fs";
-import { jsonError } from "@/lib/db";
+import { isUuid, jsonError } from "@/lib/db";
 import { chatDiagramInstructions, cleanDiagram, diagramInstructions, type Diagram } from "@/lib/diagrams";
 import { undoDoubleEscapingDeep } from "@/lib/model-text";
 
-// Maps AI failures to a sign-in notice (503) or the provider's message (502).
+// Maps AI failures to a sign-in notice (503), a cancelled request (499), or the provider's message (502).
 export function aiErrorResponse(error: unknown, action: string) {
   const message = error instanceof Error ? error.message : `Could not ${action}`;
+  if (message === "Request cancelled") return jsonError(message, 499);
   if (isAiSetupError(message)) return jsonError(`Sign in to an AI account to ${action}.`, 503);
   return jsonError(message, 502);
 }

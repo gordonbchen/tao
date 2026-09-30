@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, CircleHelp, List as ListIcon, RotateCcw, ThumbsUp, TriangleAlert } from "lucide-react";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
-import { api, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "../../components";
+import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
@@ -46,6 +46,9 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   const autoStarted = useRef(false);
   // Counts problem loads so a slow generation cannot replace a problem opened from Browse meanwhile.
   const loadCount = useRef(0);
+  // Stops the problem being made or the answer being checked.
+  const stopper = useRef<AbortController | null>(null);
+  const stop = () => stopper.current?.abort();
   const answerInput = useRef<HTMLTextAreaElement>(null);
 
   useLayoutEffect(() => {
@@ -74,17 +77,23 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
       return;
     }
     const load = ++loadCount.current;
+    const controller = new AbortController();
+    stopper.current = controller;
     setWorking(true); setGenerating(true); setError("");
     try {
-      const result = await api<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ ...selection, ...(skipReuse ? { skipReuse: true } : {}) }) });
+      const result = await aiApi<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...selection, ...(skipReuse ? { skipReuse: true } : {}) }), signal: controller.signal });
       if (load === loadCount.current) show(result.problem, null);
-    } catch (e) { if (load === loadCount.current) setError(e instanceof Error ? e.message : "Could not create a problem"); }
-    finally { if (load === loadCount.current) { setWorking(false); setGenerating(false); } }
-  }, [ai.configured, aiHeaders, subjectId, selection, show]);
+    } catch (e) {
+      if (load === loadCount.current && !isAbort(e)) setError(e instanceof Error ? e.message : "Could not create a problem");
+    }
+    finally { if (load === loadCount.current) { setWorking(false); setGenerating(false); stopper.current = null; } }
+  }, [ai.configured, subjectId, selection, show]);
 
   // Opens a past problem with its chat and latest attempt, replacing any problem still being generated.
   async function open(id: string) {
     setBrowsing(false);
+    stop();
     const load = ++loadCount.current;
     setWorking(true); setError("");
     try {
@@ -101,22 +110,25 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     void generate();
   }, [ai.ready, generate]);
 
-  async function askTutor(message: string) {
+  async function askTutor(message: string, signal: AbortSignal) {
     if (!problem) throw new Error("No problem is open.");
     if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to continue."); }
-    const result = await api<{ hint: string; diagram: DiagramData | null }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ message }) });
+    const result = await aiApi<{ hint: string; diagram: DiagramData | null }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }), signal });
     return { text: result.hint, diagram: result.diagram };
   }
 
   async function submitAttempt(e: React.FormEvent) {
     e.preventDefault(); if (!problem || !answer.trim()) return;
     if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Sign in to an AI account to continue."); return; }
+    const controller = new AbortController();
+    stopper.current = controller;
     setWorking(true); setError("");
     try {
-      const result = await api<Feedback>(`/api/problems/${problem.id}/attempts`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ answer: answer.trim(), difficulty: rating }) });
+      const result = await aiApi<Feedback>(`/api/problems/${problem.id}/attempts`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer: answer.trim(), difficulty: rating }), signal: controller.signal });
       setFeedback(result); setShowSolution(false); setFeedbackMode(null); saveDraft(`answer:${problem.id}`, "");
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not check your answer"); }
-    finally { setWorking(false); }
+    } catch (e) { if (!isAbort(e)) setError(e instanceof Error ? e.message : "Could not check your answer"); }
+    finally { setWorking(false); stopper.current = null; }
   }
 
   async function submitProblemFeedback(e: React.FormEvent) {
@@ -145,7 +157,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   </div>;
   const browseDialog = browsing && <BrowseDialog subjectId={subjectId} selection={selection} onOpen={open} onClose={() => setBrowsing(false)} />;
 
-  if (!problem) return <>{toolbar}<div className="flex flex-col items-start gap-4 py-8">{generating ? <p className="inline-flex items-center gap-3 text-muted"><Spinner />Making a problem…</p> : <>
+  if (!problem) return <>{toolbar}<div className="flex flex-col items-start gap-4 py-8">{generating ? <div className="flex items-center gap-3 text-muted"><Spinner />Making a problem…<Button size="sm" variant="ghost" onClick={stop}>Stop</Button></div> : <>
     {error && <ErrorMessage className="my-0 w-full">{error}</ErrorMessage>}
     <Button variant="primary" onClick={() => ai.configured ? generate() : notifyAiSetupRequired()} disabled={working}>{ai.configured ? "Try again" : "Connect AI"}</Button>
   </>}</div>{browseDialog}</>;
@@ -179,7 +191,10 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         {answer.includes("\\(") || answer.includes("\\[") ? <div className="mt-2 border-t border-line pt-3"><span className="text-xs text-muted">Math preview</span><MathText className="mt-1 whitespace-pre-wrap" text={answer} /></div> : null}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="How hard was it?">{ratings.map(option => <ToggleButton key={option.value} pressed={rating === option.value} onClick={() => setRating(option.value)}>{option.label}</ToggleButton>)}</div>
-          <Button type="submit" size="sm" variant="primary" disabled={!answer.trim() || working}>{working ? <><Spinner />Checking…</> : <>Check answer <ArrowRight size={16} /></>}</Button>
+          <div className="flex items-center gap-2">
+            {working && !generating && <Button size="sm" variant="ghost" onClick={stop}>Stop</Button>}
+            <Button type="submit" size="sm" variant="primary" disabled={!answer.trim() || working}>{working ? <><Spinner />Checking…</> : <>Check answer <ArrowRight size={16} /></>}</Button>
+          </div>
         </div>
       </form></Card> : <section className={cn("rounded-lg border p-6 max-sm:p-4", feedbackTone)}>
         <div className="mb-3 inline-flex items-center gap-2 font-semibold"><FeedbackIcon size={18} />{correctnessLabel}</div>
@@ -191,6 +206,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           {feedback.solution && <Button variant="ghost" onClick={() => setShowSolution(v => !v)}>{showSolution ? "Hide solution" : "Show solution"}</Button>}
           <Button variant="ghost" onClick={() => { setFeedback(null); setShowSolution(false); }} disabled={working}><RotateCcw size={16} />Try again</Button>
+          {generating && <Button variant="ghost" onClick={stop}>Stop</Button>}
           <Button variant="primary" onClick={() => generate()} disabled={working}>{working ? <><Spinner />Making a problem…</> : <>Next problem <ArrowRight size={16} /></>}</Button>
         </div>
       </section>}

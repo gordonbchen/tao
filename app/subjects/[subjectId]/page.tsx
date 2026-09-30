@@ -5,7 +5,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExtern
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, placeInTree, positionAt, siblingPositions } from "@/lib/topic-tree";
-import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
+import { aiApi, api, AppShell, getAiRequestHeaders, isAbort, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { SavedChat } from "../../chat";
 import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
@@ -55,6 +55,9 @@ function SubjectContent() {
   const [uploadProgress, setUploadProgress] = useState("");
   const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: string[] }[]>([]);
   const suggestions = suggestionQueue[0] ?? null;
+  // Suggestions being added, as `${resourceId}\n${name}`, so their buttons show progress.
+  const [addingSuggestions, setAddingSuggestions] = useState<string[]>([]);
+  const [suggestionError, setSuggestionError] = useState("");
   const [findingTopicsIds, setFindingTopicsIds] = useState<string[]>([]);
   // The resource whose request for new topics found none.
   const [noNewTopicsId, setNoNewTopicsId] = useState<string | null>(null);
@@ -84,6 +87,10 @@ function SubjectContent() {
   const activeTopicIdRef = useRef<string | null>(null);
   const summariesInProgress = useRef(new Set<string>());
   const summariesQueued = useRef(new Set<string>());
+  const summariesWaiting = useRef<string[]>([]);
+  // AI requests a Stop button can abort, keyed by what they work on, such as `topic-summary:{id}`.
+  const stoppers = useRef(new Map<string, AbortController>());
+  const summaryRunners = useRef(0);
 
   useEffect(() => { activeTopicIdRef.current = topicDetail?.id ?? null; }, [topicDetail?.id]);
   const activeGroupIdRef = useRef<string | null>(null);
@@ -111,6 +118,20 @@ function SubjectContent() {
   const wide = useMediaQuery("(min-width: 64rem)");
   const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name}
     className={beside ? splitChat : "mx-auto h-dvh min-h-80 w-full max-w-3xl"} />;
+  // Starts a request that `stopRequest(key)` can abort; `finished` forgets it.
+  function stoppable(key: string) {
+    const controller = new AbortController();
+    stoppers.current.set(key, controller);
+    return controller.signal;
+  }
+  function finished(key: string, signal: AbortSignal) {
+    if (stoppers.current.get(key)?.signal === signal) stoppers.current.delete(key);
+  }
+  function stopRequest(key: string) {
+    stoppers.current.get(key)?.abort();
+    stoppers.current.delete(key);
+  }
+
   function flash(itemId: string) {
     setHighlightId(itemId);
     setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
@@ -312,25 +333,31 @@ function SubjectContent() {
     if (summarizingGroupIds.includes(groupId)) return;
     setSummarizingGroupIds((current) => [...current, groupId]);
     setGroupErrors((current) => ({ ...current, [groupId]: "" }));
+    const signal = stoppable(`group-summary:${groupId}`);
     try {
-      const summary = await api<Pick<GroupDetail, "id" | "summary" | "summaryStatus" | "summaryProvider" | "summaryModel">>(`/api/groups/${groupId}/summary`, { method: "POST", headers: getAiRequestHeaders() });
+      const summary = await aiApi<Pick<GroupDetail, "id" | "summary" | "summaryStatus" | "summaryProvider" | "summaryModel">>(`/api/groups/${groupId}/summary`, { method: "POST", signal });
       setGroupDetail((current) => current?.id === groupId ? { ...current, ...summary } : current);
     } catch (e) {
+      if (isAbort(e)) return;
       const message = e instanceof Error ? e.message : "Could not summarize this folder";
       setGroupErrors((current) => ({ ...current, [groupId]: message }));
       if (/Sign in to an AI account|(Codex|Claude|OpenCode) is (unavailable|not signed in)/i.test(message)) notifyAiSetupRequired();
-    } finally { setSummarizingGroupIds((current) => current.filter((item) => item !== groupId)); }
+    } finally { finished(`group-summary:${groupId}`, signal); setSummarizingGroupIds((current) => current.filter((item) => item !== groupId)); }
   }
 
   async function proposeOrganization() {
     if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
     setOrganizing("loading");
     setPreviewCollapsed(new Set());
+    const signal = stoppable("organize");
     try {
-      const proposal = await api<{ topics: (Topic & { path: string[] })[] }>(`/api/subjects/${id}/tree`, { method: "POST", headers: getAiRequestHeaders() });
+      const proposal = await aiApi<{ topics: (Topic & { path: string[] })[] }>(`/api/subjects/${id}/tree`, { method: "POST", signal });
       setOrganizing(proposal);
-    } catch (e) { setOrganizing(null); failed("Could not organize topics")(e); }
+    } catch (e) { if (!isAbort(e)) { setOrganizing(null); failed("Could not organize topics")(e); } }
+    finally { finished("organize", signal); }
   }
+  // Closing the dialog while the model is still placing topics stops it.
+  const closeOrganizing = () => { stopRequest("organize"); setOrganizing(null); };
 
   async function applyOrganization() {
     if (!organizing || organizing === "loading") return;
@@ -466,17 +493,19 @@ function SubjectContent() {
     try {
       do {
         summariesQueued.current.delete(topicId);
+        const signal = stoppable(`topic-summary:${topicId}`);
         try {
-          const summary = await api<Pick<TopicDetail, "id" | "name" | "coverageSummary" | "summaryProvider" | "summaryModel" | "summaryStatus">>(`/api/topics/${topicId}/summary`, { method: "POST", headers: getAiRequestHeaders() });
+          const summary = await aiApi<Pick<TopicDetail, "id" | "name" | "coverageSummary" | "summaryProvider" | "summaryModel" | "summaryStatus">>(`/api/topics/${topicId}/summary`, { method: "POST", signal });
           setTopicDetail((current) => current?.id === topicId ? { ...current, ...summary } : current);
           setTopics((current) => current.map((topic) => topic.id === topicId ? { ...topic, summaryStatus: "complete" } : topic));
         } catch (e) {
+          if (isAbort(e)) { summariesQueued.current.delete(topicId); break; }
           const message = e instanceof Error ? e.message : "Could not create a topic summary";
           setTopicSummaryError(topicId, message);
           if (/Sign in to an AI account|(Codex|Claude|OpenCode) is (unavailable|not signed in)/i.test(message)) notifyAiSetupRequired();
           setTopicDetail((current) => current?.id === topicId ? { ...current, summaryStatus: "failed" } : current);
           break;
-        }
+        } finally { finished(`topic-summary:${topicId}`, signal); }
       } while (summariesQueued.current.has(topicId));
     } finally {
       summariesInProgress.current.delete(topicId);
@@ -508,19 +537,27 @@ function SubjectContent() {
       const linked = topics.filter((topic) => topicIds.includes(topic.id)).map(({ id, name }) => ({ id, name }));
       setResourceText((current) => current?.id === resourceId ? { ...current, topics: linked } : current);
       setResources((current) => current.map((resource) => resource.id === resourceId ? { ...resource, topicIds } : resource));
-      for (const topicId of result.refreshTopicIds) void generateTopicSummary(topicId);
+      queueTopicSummaries(result.refreshTopicIds);
     } catch (e) { setResourceTopicsError(e instanceof Error ? e.message : "Could not save linked topics"); }
     finally { setSavingResourceIds((current) => current.filter((savingId) => savingId !== resourceId)); }
   }
 
-  // Asks the model for unlinked items that cover the same material, ranked by their short briefs.
+  // Asks the model for unlinked items that cover the same material, ranked by their short briefs. While it works, the
+  // same button stops it.
   function loadLinkSuggestions(key: string, url: string) {
+    if (linkSuggestions[key] === "loading") { stopRequest(`suggest:${key}`); return; }
     if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
-    if (linkSuggestions[key] === "loading") return;
     setLinkSuggestions((current) => ({ ...current, [key]: "loading" }));
-    void api<{ ids: string[] }>(url, { method: "POST", headers: getAiRequestHeaders() })
+    const signal = stoppable(`suggest:${key}`);
+    void aiApi<{ ids: string[] }>(url, { method: "POST", signal })
       .then((result) => setLinkSuggestions((current) => ({ ...current, [key]: result.ids })))
-      .catch(() => setLinkSuggestions((current) => ({ ...current, [key]: "failed" })));
+      .catch((e) => setLinkSuggestions((current) => {
+        if (!isAbort(e)) return { ...current, [key]: "failed" };
+        const rest = { ...current };
+        delete rest[key];
+        return rest;
+      }))
+      .finally(() => finished(`suggest:${key}`, signal));
   }
 
   // Asks the model again for topics a resource teaches and queues them for review, as after an upload.
@@ -530,14 +567,16 @@ function SubjectContent() {
     if (!resource || findingTopicsIds.includes(resourceId)) return;
     setFindingTopicsIds((current) => [...current, resourceId]);
     setResourceTopicsError(""); setNoNewTopicsId(null);
+    const signal = stoppable(`new-topics:${resourceId}`);
     try {
-      const result = await api<{ topics: string[] }>(`/api/resources/${resourceId}/new-topics`, { method: "POST", headers: getAiRequestHeaders() });
+      const result = await aiApi<{ topics: string[] }>(`/api/resources/${resourceId}/new-topics`, { method: "POST", signal });
       if (!result.topics.length) { setNoNewTopicsId(resourceId); return; }
       setResourceText((current) => current?.id === resourceId ? null : current);
       setSuggestionQueue((current) => [...current.filter((entry) => entry.resource.id !== resourceId), { resource, topics: result.topics }]);
     } catch (e) {
-      setResourceTopicsError(e instanceof Error ? e.message : "Could not suggest topics");
+      if (!isAbort(e)) setResourceTopicsError(e instanceof Error ? e.message : "Could not suggest topics");
     } finally {
+      finished(`new-topics:${resourceId}`, signal);
       setFindingTopicsIds((current) => current.filter((item) => item !== resourceId));
     }
   }
@@ -553,11 +592,13 @@ function SubjectContent() {
     resourceSummariesInProgress.add(resourceId);
     setSummaryLoading(true);
     setSummaryError("");
+    const signal = stoppable(`resource-summary:${resourceId}`);
     try {
-      const detail = await api<Omit<ResourceText, "topics">>(`/api/resources/${resourceId}`, { method: "POST", headers: getAiRequestHeaders() });
+      const detail = await aiApi<Omit<ResourceText, "topics">>(`/api/resources/${resourceId}`, { method: "POST", signal });
       setResourceText((current) => current?.id === resourceId ? { ...current, ...detail } : current);
       setResources((current) => current.map((item) => item.id === resourceId ? { ...item, summaryStatus: "complete" } : item));
     } catch (e) {
+      if (isAbort(e)) return;
       const message = e instanceof Error ? e.message : "Could not create a resource summary";
       setSummaryError(message);
       const setupRequired = /Sign in to an AI account|(Codex|Claude|OpenCode) is (unavailable|not signed in)/i.test(message);
@@ -565,30 +606,52 @@ function SubjectContent() {
       setResourceText((current) => current?.id === resourceId ? { ...current, summaryStatus: setupRequired ? "not_generated" : "failed" } : current);
       setError(message);
     } finally {
+      finished(`resource-summary:${resourceId}`, signal);
       resourceSummariesInProgress.delete(resourceId);
       setSummaryLoading(false);
     }
   }
 
-  // Creates the suggested topic in Unorganized, or links the existing topic where it is.
-  async function addSuggestedTopic(name: string) {
-    const sourceResource = suggestions?.resource;
-    if (!sourceResource) return;
-    try {
-      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name, unorganized: true }) });
-      await api(`/api/topics/${topic.id}/resources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceId: sourceResource.id }) });
-      setResources((current) => current.map((resource) => resource.id === sourceResource.id ? { ...resource, topicIds: [...new Set([...(resource.topicIds ?? []), topic.id])] } : resource));
-      setSuggestionQueue((current) => {
-        if (!current.length || current[0].resource.id !== sourceResource.id) return current;
-        const remaining = current[0].topics.filter((topic) => topic !== name);
-        return remaining.length ? [{ ...current[0], topics: remaining }, ...current.slice(1)] : current.slice(1);
-      });
-      await refresh();
-      revealAndFlash(topic.id, topic.groupId);
-      void generateTopicSummary(topic.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not add topic");
+  // Summarizes topics two at a time. Each summary is a long request, and starting many at once would use up the
+  // browser's connections to the server, so every other request would wait for them.
+  function queueTopicSummaries(topicIds: string[]) {
+    summariesWaiting.current.push(...topicIds.filter((topicId) => !summariesWaiting.current.includes(topicId)));
+    while (summaryRunners.current < 2 && summariesWaiting.current.length) {
+      summaryRunners.current++;
+      void (async () => {
+        for (let next = summariesWaiting.current.shift(); next; next = summariesWaiting.current.shift()) await generateTopicSummary(next);
+        summaryRunners.current--;
+      })();
     }
+  }
+
+  // Creates suggested topics in Unorganized, or links existing topics where they are, with one request per resource.
+  async function addSuggestedTopics(entries: { resource: Resource; topics: string[] }[]) {
+    const keys = entries.flatMap(({ resource, topics: names }) => names.map((name) => `${resource.id}\n${name}`));
+    setAddingSuggestions((current) => [...current, ...keys]);
+    setSuggestionError("");
+    const added: Topic[] = [];
+    try {
+      for (const { resource, topics: names } of entries) {
+        const created = await api<Topic[]>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ names, unorganized: true, resourceId: resource.id }) });
+        added.push(...created);
+        const createdIds = created.map((topic) => topic.id);
+        setResources((current) => current.map((item) => item.id === resource.id ? { ...item, topicIds: [...new Set([...(item.topicIds ?? []), ...createdIds])] } : item));
+        setSuggestionQueue((current) => current.flatMap((entry) => {
+          if (entry.resource.id !== resource.id) return [entry];
+          const remaining = entry.topics.filter((name) => !names.includes(name));
+          return remaining.length ? [{ ...entry, topics: remaining }] : [];
+        }));
+      }
+    } catch (e) {
+      setSuggestionError(e instanceof Error ? e.message : "Could not add topics");
+    } finally {
+      setAddingSuggestions((current) => current.filter((key) => !keys.includes(key)));
+    }
+    if (!added.length) return;
+    await refresh();
+    if (added.length === 1) revealAndFlash(added[0].id, added[0].groupId);
+    queueTopicSummaries([...new Set(added.map((topic) => topic.id))]);
   }
 
   // In an open topic, folder, or resource: Tab cycles its tabs, and Left/Right open the previous or next item.
@@ -630,7 +693,7 @@ function SubjectContent() {
 
   const pending = (text: string, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-3 py-6 text-muted"><Spinner />{text}{action}</div>;
   const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
-  const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
+  const closeSuggestions = () => { setSuggestionError(""); setSuggestionQueue((current) => current.slice(1)); };
 
   const subjectChat = subjectChatOpen && !loading && !!subject;
   // Wide from the first paint when the chat will be open (the layout's script sets the attribute), so the page does not
@@ -680,15 +743,23 @@ function SubjectContent() {
         const existing = topics.find((topic) => topic.name.toLocaleLowerCase() === suggestion.toLocaleLowerCase());
         const place = !existing ? "New topic, added to Unorganized" : existing.unorganized ? "Existing topic in Unorganized"
           : `Existing topic in ${existing.groupId ? groupPath(groups, existing.groupId).join(" › ") : "the top level"}`;
+        const adding = addingSuggestions.includes(`${suggestions.resource.id}\n${suggestion}`);
         return <ListItem key={suggestion}>
           <div className="flex min-w-0 flex-1 flex-col">
             <span>{existing?.name ?? suggestion}</span>
             <span className="text-xs text-muted">{place}</span>
           </div>
-          <Button size="sm" onClick={() => addSuggestedTopic(suggestion)}>{existing ? <><Check size={16} />Link</> : <><Plus size={16} />Add</>}</Button>
+          <Button size="sm" disabled={adding} onClick={() => void addSuggestedTopics([{ resource: suggestions.resource, topics: [suggestion] }])}>
+            {adding ? <Spinner /> : existing ? <Check size={16} /> : <Plus size={16} />}{existing ? "Link" : "Add"}
+          </Button>
         </ListItem>;
       })}</List>
-      <div className="mt-6 flex justify-end"><Button onClick={closeSuggestions}>{suggestionQueue.length > 1 ? "Next resource" : "Done"}</Button></div>
+      {suggestionError && <ErrorMessage>{suggestionError}</ErrorMessage>}
+      <div className="mt-6 flex flex-wrap justify-end gap-2">
+        {suggestionQueue.length > 1 && <Button disabled={addingSuggestions.length > 0} onClick={() => void addSuggestedTopics(suggestionQueue)}>Add all from {suggestionQueue.length} files</Button>}
+        <Button variant="primary" disabled={addingSuggestions.length > 0} onClick={() => void addSuggestedTopics([suggestions])}>Add all</Button>
+        <Button onClick={closeSuggestions}>{suggestionQueue.length > 1 ? "Next resource" : "Done"}</Button>
+      </div>
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
@@ -696,7 +767,7 @@ function SubjectContent() {
       {resourceTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}</section>
       : resourceTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename, true)}><section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
-        {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
+        {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", summaryLoading ? <Button size="sm" variant="ghost" onClick={() => stopRequest(`resource-summary:${resourceText.id}`)}>Stop</Button> : <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
           <MarkdownMathText text={resourceText.modelSummary} />
         </> : <div className="flex flex-col items-start gap-4 py-4">
           <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
@@ -708,8 +779,9 @@ function SubjectContent() {
         <LinkPicker noun="topic" target="resource" icon={BookOpen} items={topics} saved={resourceText.topics.map((topic) => topic.id)}
           selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
           suggestions={linkSuggestions[`resource:${resourceText.id}`]} onSuggest={() => loadLinkSuggestions(`resource:${resourceText.id}`, `/api/resources/${resourceText.id}/suggested-topics`)}
-          extraAction={resourceText.extractedText && <Button disabled={findingTopicsIds.includes(resourceText.id)} onClick={() => void suggestNewTopics(resourceText.id)} title="Ask the model for topics this file teaches that aren't linked to it yet">
-            {findingTopicsIds.includes(resourceText.id) ? <><Spinner />Finding…</> : <><BookPlus size={16} />New topics</>}</Button>}
+          extraAction={resourceText.extractedText && <Button onClick={() => findingTopicsIds.includes(resourceText.id) ? stopRequest(`new-topics:${resourceText.id}`) : void suggestNewTopics(resourceText.id)}
+            title={findingTopicsIds.includes(resourceText.id) ? "Stop finding new topics" : "Ask the model for topics this file teaches that aren't linked to it yet"}>
+            {findingTopicsIds.includes(resourceText.id) ? <><Spinner />Stop</> : <><BookPlus size={16} />New topics</>}</Button>}
           saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
       </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
@@ -720,7 +792,7 @@ function SubjectContent() {
       {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
       {groupTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}</section>
       : groupTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name, true)}><section role="tabpanel" aria-label="Folder summary">
-        {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
+        {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…", <Button size="sm" variant="ghost" onClick={() => stopRequest(`group-summary:${groupDetail.id}`)}>Stop</Button>) : groupDetail.summary ? <>
           {groupDetail.summaryStatus === "stale" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">This folder&apos;s contents changed. Refresh the summary to reflect them.</p>}
           <MarkdownMathText text={groupDetail.summary} />
           <div className="mt-6 flex justify-end"><Button variant={groupDetail.summaryStatus === "stale" ? "primary" : "secondary"} onClick={() => void generateGroupSummary(groupDetail.id)}>Refresh</Button></div>
@@ -735,8 +807,8 @@ function SubjectContent() {
       </section>}
     </Modal>}
 
-    {organizing && <Modal wide title="Organize topics" onClose={() => setOrganizing(null)}>
-      {organizing === "loading" ? pending("Placing your unorganized topics…") : (() => {
+    {organizing && <Modal wide title="Organize topics" onClose={closeOrganizing}>
+      {organizing === "loading" ? pending("Placing your unorganized topics…", <Button size="sm" variant="ghost" onClick={() => stopRequest("organize")}>Stop</Button>) : (() => {
         const preview = placeInTree(groups, organizedTopics, organizing.topics);
         const left = unorganizedTopics.length - organizing.topics.length;
         return <>
@@ -746,7 +818,7 @@ function SubjectContent() {
             if (!next.delete(groupId)) next.add(groupId);
             return next;
           })} />
-          <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setOrganizing(null)}>Cancel</Button><Button variant="primary" disabled={!organizing.topics.length} onClick={() => void applyOrganization()}>Apply</Button></div>
+          <div className="mt-6 flex justify-end gap-2"><Button onClick={closeOrganizing}>Cancel</Button><Button variant="primary" disabled={!organizing.topics.length} onClick={() => void applyOrganization()}>Apply</Button></div>
         </>;
       })()}
     </Modal>}
@@ -766,7 +838,7 @@ function SubjectContent() {
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
       {topicTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}</section>
       : topicTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name, true)}><section role="tabpanel" aria-label="Topic coverage summary">
-        {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
+        {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…", summarizingTopicIds.includes(topicDetail.id) && <Button size="sm" variant="ghost" onClick={() => stopRequest(`topic-summary:${topicDetail.id}`)}>Stop</Button>) : topicDetail.coverageSummary ? <>
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
           {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
@@ -879,7 +951,8 @@ function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelect
       {Array.isArray(suggestions) && !suggestions.some((id) => !selected.includes(id)) && <span className="text-sm text-muted max-sm:hidden">No clear matches</span>}
       {suggestions === "failed" && <span className="text-sm text-danger max-sm:hidden">Suggestions failed</span>}
       {extraAction}
-      <Button disabled={suggestions === "loading" || items.length === selected.length} onClick={onSuggest} title={`Ask the model which ${noun}s cover the same material`}>{suggestions === "loading" ? <Spinner /> : <Sparkles size={16} />}{suggestions === "loading" ? "Suggesting…" : "Suggest"}</Button>
+      {suggestions === "loading" ? <Button onClick={onSuggest} title="Stop suggesting"><Spinner />Stop</Button>
+        : <Button disabled={items.length === selected.length} onClick={onSuggest} title={`Ask the model which ${noun}s cover the same material`}><Sparkles size={16} />Suggest</Button>}
       <Input className="w-64 max-sm:w-40" type="search" aria-label={`Search available ${noun}s`} placeholder={`Search ${noun}s`} value={search} onChange={(event) => onSearchChange(event.target.value)} /></div></div>
     {available.length ? <List>{available.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${item.name} to this ${target}`} onClick={() => onSelectedChange([...selected, item.id])}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{suggested.includes(item.id) && <Badge><Sparkles size={12} />Suggested</Badge>}{saved.includes(item.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{items.length === 0 ? `No ${noun}s yet.` : search ? `No matching ${noun}s.` : `All ${noun}s selected.`}</p>}
   </>;

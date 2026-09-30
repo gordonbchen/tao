@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, History, Lightbulb, ListCollapse, MessageSquarePlus, Pencil, Send } from "lucide-react";
+import { ArrowLeft, History, Lightbulb, ListCollapse, MessageSquarePlus, Pencil, Send, Square } from "lucide-react";
 import { recentMessages, sinceSummary } from "@/lib/chat-context";
-import { api, getAiRequestHeaders, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "./components";
+import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "./components";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { Diagram } from "./diagram";
 import { MathText } from "./math-text";
@@ -19,7 +19,7 @@ export type PastChat = { clearedAt: string; lastAt: string; name: string; messag
 const when = (date: string) => new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 // Tutor conversation for problems, flashcards, topics, folders, and resources. Remount it with a new `key` for each item.
-// `send` returns the tutor's reply. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
+// `send` returns the tutor's reply; its signal aborts when the student presses Stop. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
 // that message, `summarize` adds a button that condenses the conversation so far, and `clear` one that starts a new chat.
 // `history` adds a list of all chats; `resume` switches to an earlier one, setting the current chat aside. `rename` makes
 // the chat's name editable. `draftKey` keeps the unsent message in this browser as it is typed.
@@ -27,11 +27,11 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   initialName?: string;
   draftKey?: string;
   initialMessages?: ChatMessage[];
-  send: (text: string) => Promise<ChatReply>;
+  send: (text: string, signal: AbortSignal) => Promise<ChatReply>;
   placeholder: string;
   empty: string;
   hint?: string;
-  summarize?: () => Promise<string>;
+  summarize?: (signal: AbortSignal) => Promise<string>;
   clear?: () => Promise<void>;
   history?: () => Promise<PastChat[]>;
   resume?: (clearedAt: string) => Promise<void>;
@@ -47,6 +47,8 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   const setText = (value: string) => { setTextState(value); saveDraft(draftKey, value); };
   // What the chat is waiting for, shown beside a spinner; empty when idle.
   const [busy, setBusy] = useState("");
+  // Stops the reply or summary being written; Send becomes Stop meanwhile.
+  const [stopper, setStopper] = useState<AbortController | null>(null);
   // Earlier chats while the chat list is open.
   const [past, setPast] = useState<PastChat[] | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -68,29 +70,36 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     setText("");
     setMessages((items) => [...items, { role: "user", text: content }]);
     setBusy("Thinking…");
+    const controller = new AbortController();
+    setStopper(controller);
     try {
-      const reply = await send(content);
+      const reply = await send(content, controller.signal);
       setMessages((items) => [...items, { role: "assistant", text: reply.text, diagram: reply.diagram }]);
       if (reply.name) setName(reply.name);
     } catch (error) {
-      setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "I couldn’t reply just now. Try again in a moment." }]);
-    } finally { setBusy(""); }
+      // A stopped question was never saved, so it goes back to the input.
+      if (isAbort(error)) { setMessages((items) => items.slice(0, -1)); if (content !== hint) setText(content); }
+      else setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "I couldn’t reply just now. Try again in a moment." }]);
+    } finally { setBusy(""); setStopper(null); }
   }
 
-  // Runs a chat-wide action, showing a failure as a tutor message.
-  async function act(action: () => Promise<void>, label: string, failure: string) {
+  // Runs a chat-wide action, showing a failure as a tutor message. With `controller`, Stop aborts it.
+  async function act(action: () => Promise<void>, label: string, failure: string, controller?: AbortController) {
     if (busy) return;
     setBusy(label);
+    setStopper(controller ?? null);
     try { await action(); }
-    catch (error) { setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : failure }]); }
-    finally { setBusy(""); }
+    catch (error) { if (!isAbort(error)) setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : failure }]); }
+    finally { setBusy(""); setStopper(null); }
   }
 
   const unsummarized = sinceSummary(messages).messages;
   // The server sends the tutor only what fits `recentMessages`; say when older messages no longer do.
   const leftOut = unsummarized.length > recentMessages(unsummarized).length;
   const summarizeChat = () => {
-    if (summarize) void act(async () => { const text = await summarize(); setMessages((items) => [...items, { role: "summary", text }]); }, "Summarizing the chat…", "The chat could not be summarized.");
+    if (!summarize) return;
+    const controller = new AbortController();
+    void act(async () => { const text = await summarize(controller.signal); setMessages((items) => [...items, { role: "summary", text }]); }, "Summarizing the chat…", "The chat could not be summarized.", controller);
   };
 
   const showHistory = () => {
@@ -166,7 +175,8 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(text); } }} placeholder={placeholder} />
       {hint && <IconButton label="Get a hint" onClick={() => void ask(hint)} disabled={!!busy}><Lightbulb size={18} /></IconButton>}
       {summarize && unsummarized.length >= 2 && <IconButton label="Summarize chat" onClick={summarizeChat} disabled={!!busy}><ListCollapse size={18} /></IconButton>}
-      <IconButton type="submit" label="Send message" className="text-accent" disabled={!text.trim() || !!busy}><Send size={18} /></IconButton>
+      {stopper ? <IconButton label="Stop" className="text-accent" onClick={() => stopper.abort()}><Square size={16} fill="currentColor" /></IconButton>
+        : <IconButton type="submit" label="Send message" className="text-accent" disabled={!text.trim() || !!busy}><Send size={18} /></IconButton>}
     </form>
   </Card>;
 }
@@ -203,15 +213,15 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
     api<{ messages: ChatMessage[]; name: string }>(path).then(setChat, (reason: Error) => setError(reason.message));
   }, [path]);
 
-  async function send(message: string) {
+  async function send(message: string, signal: AbortSignal) {
     if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to chat."); }
-    const result = await api<{ reply: string; diagram: DiagramData | null; name?: string }>(path, { method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+    const result = await aiApi<{ reply: string; diagram: DiagramData | null; name?: string }>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }), signal });
     return { text: result.reply, diagram: result.diagram, name: result.name };
   }
 
-  async function summarize() {
+  async function summarize(signal: AbortSignal) {
     if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to summarize."); }
-    const result = await api<{ summary: string }>(path, { method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ summarize: true }) });
+    const result = await aiApi<{ summary: string }>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summarize: true }), signal });
     return result.summary;
   }
 
