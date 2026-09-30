@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
@@ -53,6 +53,9 @@ function SubjectContent() {
   const [uploadProgress, setUploadProgress] = useState("");
   const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: Placement[] }[]>([]);
   const suggestions = suggestionQueue[0] ?? null;
+  const [findingTopicsIds, setFindingTopicsIds] = useState<string[]>([]);
+  // The resource whose request for new topics found none.
+  const [noNewTopicsId, setNoNewTopicsId] = useState<string | null>(null);
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
   const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted" | "chat">("summary");
@@ -510,6 +513,25 @@ function SubjectContent() {
       .catch(() => setLinkSuggestions((current) => ({ ...current, [key]: "failed" })));
   }
 
+  // Asks the model again for topics a resource teaches and queues them for review, as after an upload.
+  async function suggestNewTopics(resourceId: string) {
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    const resource = resources.find((item) => item.id === resourceId);
+    if (!resource || findingTopicsIds.includes(resourceId)) return;
+    setFindingTopicsIds((current) => [...current, resourceId]);
+    setResourceTopicsError(""); setNoNewTopicsId(null);
+    try {
+      const result = await api<{ topics: Placement[] }>(`/api/resources/${resourceId}/new-topics`, { method: "POST", headers: getAiRequestHeaders() });
+      if (!result.topics.length) { setNoNewTopicsId(resourceId); return; }
+      setResourceText((current) => current?.id === resourceId ? null : current);
+      setSuggestionQueue((current) => [...current.filter((entry) => entry.resource.id !== resourceId), { resource, topics: result.topics }]);
+    } catch (e) {
+      setResourceTopicsError(e instanceof Error ? e.message : "Could not suggest topics");
+    } finally {
+      setFindingTopicsIds((current) => current.filter((item) => item !== resourceId));
+    }
+  }
+
   async function generateResourceSummary(resourceId: string) {
     if (!aiSettings.ready) return;
     if (!aiSettings.configured) {
@@ -672,9 +694,12 @@ function SubjectContent() {
         </div>}
       </section></WithChat> : resourceTab === "topics" ? <section role="tabpanel" aria-label="Topics linked to resource">
         {resourceTopicsError && <ErrorMessage>{resourceTopicsError}</ErrorMessage>}
+        {noNewTopicsId === resourceText.id && <p className="mb-4 text-sm text-muted" role="status">The model found no topics in this file beyond those already linked.</p>}
         <LinkPicker noun="topic" target="resource" icon={BookOpen} items={topics} saved={resourceText.topics.map((topic) => topic.id)}
           selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
           suggestions={linkSuggestions[`resource:${resourceText.id}`]} onSuggest={() => loadLinkSuggestions(`resource:${resourceText.id}`, `/api/resources/${resourceText.id}/suggested-topics`)}
+          extraAction={resourceText.extractedText && <Button disabled={findingTopicsIds.includes(resourceText.id)} onClick={() => void suggestNewTopics(resourceText.id)} title="Ask the model for topics this file teaches that aren't linked to it yet">
+            {findingTopicsIds.includes(resourceText.id) ? <><Spinner />Finding…</> : <><BookPlus size={16} />New topics</>}</Button>}
           saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
       </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
@@ -813,13 +838,15 @@ type LinkPickerProps = {
   onSearchChange: (search: string) => void;
   suggestions?: LinkSuggestions;
   onSuggest: () => void;
+  // Shown before Suggest, such as a way to create items instead of linking existing ones.
+  extraAction?: ReactNode;
   saving: boolean;
   savingLabel?: string;
   onSave: () => void;
 };
 
 // Stages link changes between a topic and resources (or the reverse) until Save.
-function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, suggestions, onSuggest, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
+function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, suggestions, onSuggest, extraAction, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
   const query = search.trim().toLocaleLowerCase();
   const chosen = items.filter((item) => selected.includes(item.id));
   const suggested = Array.isArray(suggestions) ? suggestions : [];
@@ -833,6 +860,7 @@ function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelect
     <div className={`${sectionHead} flex-wrap`}><h3 className="text-lg font-semibold">Add {noun}s</h3><div className="flex flex-wrap items-center justify-end gap-2">
       {Array.isArray(suggestions) && !suggestions.some((id) => !selected.includes(id)) && <span className="text-sm text-muted max-sm:hidden">No clear matches</span>}
       {suggestions === "failed" && <span className="text-sm text-danger max-sm:hidden">Suggestions failed</span>}
+      {extraAction}
       <Button disabled={suggestions === "loading" || items.length === selected.length} onClick={onSuggest} title={`Ask the model which ${noun}s cover the same material`}>{suggestions === "loading" ? <Spinner /> : <Sparkles size={16} />}{suggestions === "loading" ? "Suggesting…" : "Suggest"}</Button>
       <Input className="w-64 max-sm:w-40" type="search" aria-label={`Search available ${noun}s`} placeholder={`Search ${noun}s`} value={search} onChange={(event) => onSearchChange(event.target.value)} /></div></div>
     {available.length ? <List>{available.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${item.name} to this ${target}`} onClick={() => onSelectedChange([...selected, item.id])}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{suggested.includes(item.id) && <Badge><Sparkles size={12} />Suggested</Badge>}{saved.includes(item.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{items.length === 0 ? `No ${noun}s yet.` : search ? `No matching ${noun}s.` : `All ${noun}s selected.`}</p>}

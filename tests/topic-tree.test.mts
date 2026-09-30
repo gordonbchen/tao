@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTree, cleanPath, descendantGroupIds, flattenTree, groupPath, outline, parsePlacements, positionAt, siblingPositions, treeFromPaths } from "../lib/topic-tree.ts";
+import { buildTree, cleanPath, descendantGroupIds, flattenTree, groupPath, outline, parsePlacements, pathsBesideTopics, positionAt, siblingPositions, treeFromPaths } from "../lib/topic-tree.ts";
 
 const groups = [
   { id: "analysis", name: "Analysis", parentId: null },
@@ -79,4 +79,17 @@ test("places a dragged item between, before, or after its new siblings", () => {
   assert.equal(positionAt(top, 1), 2.5);
   assert.equal(positionAt(top, 2), 5);
   assert.equal(positionAt([], 0), 0);
+});
+
+test("a suggested path through an existing topic is cut back so the new topic sits beside it", () => {
+  const tree = ["Probability spaces", { folder: "Groups", contents: ["Sylow theorems"] }];
+  assert.deepEqual(pathsBesideTopics([
+    { name: "Conditional probability", path: ["Probability Spaces"] },
+    { name: "Sylow counting", path: ["Groups", "Sylow theorems", "Extra"] },
+    { name: "Cosets", path: ["Groups", "Cosets and quotients"] },
+  ], tree), [
+    { name: "Conditional probability", path: [] },
+    { name: "Sylow counting", path: ["Groups"] },
+    { name: "Cosets", path: ["Groups", "Cosets and quotients"] },
+  ]);
 });
