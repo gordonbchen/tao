@@ -104,10 +104,10 @@ function SubjectContent() {
   const [chatOpen, toggleChat] = useStoredToggle("tao-viewer-chat", true);
   const [subjectChatOpen, toggleSubjectChat] = useStoredToggle("tao-subject-chat", false);
   const chatToggle = <ChatToggle open={chatOpen} onToggle={toggleChat} />;
-  // Wide screens show a viewer's chat beside its summary; narrow ones give it its own tab.
+  // A viewer's chat has its own tab; wide screens can also show it beside the summary.
   const wide = useMediaQuery("(min-width: 64rem)");
-  const chatTab = wide ? [] : [{ id: "chat" as const, label: "Chat" }];
-  const viewerChat = (path: string, id: string, name: string) => <SavedChat key={id} path={path} name={name} className={wide ? splitChat : "h-[calc(100dvh-10rem)]"} />;
+  const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name}
+    className={beside ? splitChat : "mx-auto h-[calc(100dvh-10rem)] max-w-3xl lg:h-[calc(100dvh-14rem)]"} />;
   function flash(itemId: string) {
     setHighlightId(itemId);
     setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
@@ -591,9 +591,9 @@ function SubjectContent() {
       if (event.key === "Tab") {
         event.preventDefault();
         const step = event.shiftKey ? -1 : 1;
-        if (resourceText) setResourceTab((tab) => cycle([...resourceTabs, ...chatTab.map((item) => item.id)], tab, step));
-        else if (groupDetail) setGroupTab((tab) => cycle([...topicTabs, ...chatTab.map((item) => item.id)], tab, step));
-        else setTopicTab((tab) => cycle([...topicTabs, ...chatTab.map((item) => item.id)], tab, step));
+        if (resourceText) setResourceTab((tab) => cycle([...resourceTabs, "chat"], tab, step));
+        else if (groupDetail) setGroupTab((tab) => cycle([...topicTabs, "chat"], tab, step));
+        else setTopicTab((tab) => cycle([...topicTabs, "chat"], tab, step));
       } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
         const step = event.key === "ArrowRight" ? 1 : -1;
@@ -682,9 +682,9 @@ function SubjectContent() {
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
-      <Tabs label="Resource content" actions={wide && (resourceTab === "summary" || resourceTab === "chat") && chatToggle} value={wide && resourceTab === "chat" ? "summary" : resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }, ...chatTab]} />
-      {!wide && resourceTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}</section>
-      : resourceTab === "summary" || resourceTab === "chat" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}><section role="tabpanel" aria-label="Model summary">
+      <Tabs label="Resource content" actions={wide && resourceTab === "summary" && chatToggle} value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }, { id: "chat", label: "Chat" }]} />
+      {resourceTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}</section>
+      : resourceTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename, true)}><section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
           <MarkdownMathText text={resourceText.modelSummary} />
@@ -706,10 +706,10 @@ function SubjectContent() {
 
     {groupDetail && <Modal wide title={groupDetail.name} label={`Folder summary for ${groupDetail.name}`} onClose={() => setGroupDetail(null)}
       subtitle={[...groupPath(groups, groupDetail.parentId), `${groupDetail.topicCount} topic${groupDetail.topicCount === 1 ? "" : "s"}`].join(" › ")}>
-      <Tabs label="Folder content" actions={wide && (groupTab === "summary" || groupTab === "chat") && chatToggle} value={wide && groupTab === "chat" ? "summary" : groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }, ...chatTab]} />
+      <Tabs label="Folder content" actions={wide && groupTab === "summary" && chatToggle} value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
-      {!wide && groupTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}</section>
-      : groupTab === "summary" || groupTab === "chat" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}><section role="tabpanel" aria-label="Folder summary">
+      {groupTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}</section>
+      : groupTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name, true)}><section role="tabpanel" aria-label="Folder summary">
         {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
           {groupDetail.summaryStatus === "stale" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">This folder&apos;s contents changed. Refresh the summary to reflect them.</p>}
           <MarkdownMathText text={groupDetail.summary} />
@@ -741,10 +741,10 @@ function SubjectContent() {
     </Modal>}
 
     {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
-      <Tabs label="Topic content" actions={wide && (topicTab === "summary" || topicTab === "chat") && chatToggle} value={wide && topicTab === "chat" ? "summary" : topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, ...chatTab]} />
+      <Tabs label="Topic content" actions={wide && topicTab === "summary" && chatToggle} value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
-      {!wide && topicTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}</section>
-      : topicTab === "summary" || topicTab === "chat" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}><section role="tabpanel" aria-label="Topic coverage summary">
+      {topicTab === "chat" ? <section role="tabpanel" aria-label="Chat">{viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}</section>
+      : topicTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name, true)}><section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
           {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
