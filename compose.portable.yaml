@@ -23,6 +23,7 @@ services:
       UPLOAD_DIR: /app/uploads
       CODEX_MODEL: ${CODEX_MODEL:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      OPENCODE_MODEL: ${OPENCODE_MODEL:-}
     env_file:
       - path: .env
         required: false
@@ -37,6 +38,7 @@ services:
       - uploads:/app/uploads
       - codex_socket:/run/tao-codex
       - claude_socket:/run/tao-claude
+      - opencode_socket:/run/tao-opencode
     depends_on:
       db:
         condition: service_healthy
@@ -63,11 +65,21 @@ services:
       - ${CLAUDE_AUTH_DIR:-claude_auth}:/claude-auth
       - claude_socket:/run/tao-claude
 
+  opencode:
+    build:
+      context: .
+      dockerfile: Dockerfile.opencode
+    volumes:
+      - ${OPENCODE_AUTH_DIR:-opencode_auth}:/root/.local/share/opencode
+      - opencode_socket:/run/tao-opencode
+
 volumes:
   postgres_data:
   next_build:
   uploads:
   codex_socket:
   claude_socket:
+  opencode_socket:
   codex_auth:
   claude_auth:
+  opencode_auth:

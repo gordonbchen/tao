@@ -204,13 +204,13 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
   }, [path]);
 
   async function send(message: string) {
-    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to Codex or Claude to chat."); }
+    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to chat."); }
     const result = await api<{ reply: string; diagram: DiagramData | null; name?: string }>(path, { method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
     return { text: result.reply, diagram: result.diagram, name: result.name };
   }
 
   async function summarize() {
-    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to Codex or Claude to summarize."); }
+    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to summarize."); }
     const result = await api<{ summary: string }>(path, { method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ summarize: true }) });
     return result.summary;
   }

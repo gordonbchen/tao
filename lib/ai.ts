@@ -1,7 +1,7 @@
 export type Difficulty = "easy" | "okay" | "hard";
 export type Rating = Difficulty | "could_not_solve";
 export type Correctness = "correct" | "partial" | "incorrect" | "uncertain";
-export type AiProvider = "codex" | "claude";
+export type AiProvider = "codex" | "claude" | "opencode";
 export type AiOptions = { model?: string };
 
 export function aiOptionsFromRequest(request: Request): AiOptions {
@@ -33,15 +33,23 @@ type Context = {
 export const AI_PROVIDERS = {
   codex: { label: "Codex", socket: "/run/tao-codex/socket", models: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"], defaultModel: process.env.CODEX_MODEL },
   claude: { label: "Claude", socket: "/run/tao-claude/socket", models: ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5"], defaultModel: process.env.CLAUDE_MODEL },
+  // OpenCode's models depend on which providers it is signed in to; its sidecar lists them as provider/model.
+  opencode: { label: "OpenCode", socket: "/run/tao-opencode/socket", models: [], defaultModel: process.env.OPENCODE_MODEL },
 } satisfies Record<AiProvider, { label: string; socket: string; models: string[]; defaultModel?: string }>;
 
 export function isAiProvider(value: unknown): value is AiProvider {
   return typeof value === "string" && Object.hasOwn(AI_PROVIDERS, value);
 }
 
-export function defaultModelFor(provider: AiProvider) {
-  const { models, defaultModel } = AI_PROVIDERS[provider];
-  return defaultModel && models.includes(defaultModel) ? defaultModel : models[0];
+export function defaultModelFor(provider: AiProvider, models: string[] = AI_PROVIDERS[provider].models) {
+  const { defaultModel } = AI_PROVIDERS[provider];
+  return defaultModel && models.includes(defaultModel) ? defaultModel : models[0] ?? "";
+}
+
+// Only OpenCode model IDs contain a slash; its sidecar checks them against its signed-in providers.
+export function providerForModel(model: string): AiProvider | undefined {
+  if (model.includes("/")) return "opencode";
+  return (Object.keys(AI_PROVIDERS) as AiProvider[]).find(provider => (AI_PROVIDERS[provider].models as string[]).includes(model));
 }
 
 function unavailableMessage(provider: AiProvider) {
@@ -49,7 +57,7 @@ function unavailableMessage(provider: AiProvider) {
 }
 
 function selectedModel(requested?: string): { provider: AiProvider; model: string } {
-  const requestedProvider = (Object.keys(AI_PROVIDERS) as AiProvider[]).find(provider => requested && AI_PROVIDERS[provider].models.includes(requested));
+  const requestedProvider = requested ? providerForModel(requested) : undefined;
   if (requestedProvider) return { provider: requestedProvider, model: requested! };
   const provider = (Object.keys(AI_PROVIDERS) as AiProvider[]).find(id => existsSync(AI_PROVIDERS[id].socket)) ?? "codex";
   return { provider, model: defaultModelFor(provider) };
@@ -174,12 +182,12 @@ import { undoDoubleEscapingDeep } from "@/lib/model-text";
 // Maps AI failures to a sign-in notice (503) or the provider's message (502).
 export function aiErrorResponse(error: unknown, action: string) {
   const message = error instanceof Error ? error.message : `Could not ${action}`;
-  if (isAiSetupError(message)) return jsonError(`Sign in to Codex or Claude to ${action}.`, 503);
+  if (isAiSetupError(message)) return jsonError(`Sign in to an AI account to ${action}.`, 503);
   return jsonError(message, 502);
 }
 
 export function isAiSetupError(message: string) {
-  return /(codex|claude) is (unavailable|not signed in)/i.test(message);
+  return /(codex|claude|opencode) is (unavailable|not signed in)/i.test(message);
 }
 
 // Reads the short relevance description returned alongside a summary.

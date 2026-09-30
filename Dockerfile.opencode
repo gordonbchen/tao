@@ -1,0 +1,7 @@
+FROM node:22-slim
+
+RUN npm install -g opencode-ai@1.18.33
+ENV OPENCODE_DISABLE_AUTOUPDATE=1
+WORKDIR /bridge
+COPY bridge ./
+CMD ["node", "opencode.mjs"]

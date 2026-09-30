@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (!message || message.length > 2000) return jsonError("Message must be 1–2,000 characters");
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before asking the tutor", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account before asking the tutor", 409);
   const previous = await query<{ content: string; diagram: Diagram | null }>("SELECT content, diagram FROM tutor_messages WHERE card_id = $1 AND role = 'tutor' ORDER BY created_at DESC LIMIT 6", [cardId]);
   let reply: Awaited<ReturnType<typeof tutorCard>>;
   try { reply = await tutorCard({ front: withFigure(card.front, card.frontDiagram), back: withFigure(card.back, card.backDiagram, "Back figure") }, body.revealed === true, message, previous.rows.reverse().map((row) => withFigure(row.content, row.diagram)), aiOptionsFromRequest(request)); }

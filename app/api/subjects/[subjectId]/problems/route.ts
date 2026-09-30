@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before practicing", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account before practicing", 409);
   let body: { topicIds?: unknown; groupIds?: unknown; skipReuse?: boolean };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   if (body.skipReuse !== undefined && typeof body.skipReuse !== "boolean") return jsonError("skipReuse must be a boolean");

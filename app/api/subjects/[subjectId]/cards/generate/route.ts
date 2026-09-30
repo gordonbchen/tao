@@ -9,7 +9,7 @@ type RouteContext = { params: Promise<{ subjectId: string }> };
 export async function POST(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before generating cards", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account before generating cards", 409);
   let body: { topicId?: unknown; count?: unknown; diagrams?: unknown };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   if (typeof body.topicId !== "string" || !isUuid(body.topicId)) return jsonError("Choose a topic", 404);

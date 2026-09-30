@@ -69,7 +69,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   const generate = useCallback(async (skipReuse = false) => {
     if (!ai.configured) {
       setGenerating(false);
-      setError("Sign in to Codex or Claude to practice.");
+      setError("Sign in to an AI account to practice.");
       notifyAiSetupRequired();
       return;
     }
@@ -103,14 +103,14 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
 
   async function askTutor(message: string) {
     if (!problem) throw new Error("No problem is open.");
-    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to Codex or Claude to continue."); }
+    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to continue."); }
     const result = await api<{ hint: string; diagram: DiagramData | null }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ message }) });
     return { text: result.hint, diagram: result.diagram };
   }
 
   async function submitAttempt(e: React.FormEvent) {
     e.preventDefault(); if (!problem || !answer.trim()) return;
-    if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Sign in to Codex or Claude to continue."); return; }
+    if (!ai.ready || !ai.configured) { notifyAiSetupRequired(); setError("Sign in to an AI account to continue."); return; }
     setWorking(true); setError("");
     try {
       const result = await api<Feedback>(`/api/problems/${problem.id}/attempts`, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ answer: answer.trim(), difficulty: rating }) });

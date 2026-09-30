@@ -21,9 +21,10 @@ export function saveDraft(key: string | undefined, text: string) {
 
 export type Subject = { id: string; name: string; topicCount: number; dueCount: number };
 
-type AIProviderStatus = { id: string; label: string; running: boolean; signedIn: boolean };
+type AIProviderStatus = { id: string; label: string; running: boolean; signedIn: boolean; accounts: string[] };
 type AIStatus = { available: boolean; providers: AIProviderStatus[]; models: { id: string; provider: string }[]; defaultModel: string };
-type SignIn = { provider: string; url: string; code?: string; needsCode?: boolean };
+// OpenCode signs in to one of many providers; one without a device or pasted code takes an API key.
+type SignIn = { provider: string; url: string; code?: string; needsCode?: boolean; needsKey?: boolean };
 type AIUsage = { usedPercent: number | null; remainingPercent: number | null; windowDurationMins: number | null; resetsAt: number | null; lifetimeTokens: number | null };
 type AISettingsValue = { model: string; configured: boolean; ready: boolean; usage: AIUsage };
 const emptyUsage: AIUsage = { usedPercent: null, remainingPercent: null, windowDurationMins: null, resetsAt: null, lifetimeTokens: null };
@@ -207,9 +208,15 @@ function AIAccounts({ providers, refresh, close }: { providers: AIProviderStatus
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
+  const [account, setAccount] = useState("opencode-go");
+  const openCodeRunning = providers.some(provider => provider.id === "opencode" && provider.running);
+  useEffect(() => {
+    if (openCodeRunning) void api<{ id: string; name: string }[]>("/api/ai/auth").then(setAccounts).catch(() => undefined);
+  }, [openCodeRunning]);
   // Device-code logins finish in the sidecar once the student approves in the browser.
   useEffect(() => {
-    if (!signIn || signIn.needsCode) return;
+    if (!signIn || signIn.needsCode || signIn.needsKey) return;
     const timer = window.setInterval(() => {
       void refresh().then(data => { if (data?.providers.find(p => p.id === signIn.provider)?.signedIn) setSignIn(null); });
     }, 3000);
@@ -218,7 +225,7 @@ function AIAccounts({ providers, refresh, close }: { providers: AIProviderStatus
   async function act(provider: string, action: "start" | "code" | "logout") {
     setBusy(provider); setError("");
     try {
-      const result = await api<SignIn & { signedIn?: boolean }>("/api/ai/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, action, code }) });
+      const result = await api<SignIn & { signedIn?: boolean }>("/api/ai/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, action, code, account }) });
       if (action === "start") { setSignIn({ ...result, provider }); setCode(""); }
       else { setSignIn(null); await refresh(); }
     } catch (caught) {
@@ -227,14 +234,19 @@ function AIAccounts({ providers, refresh, close }: { providers: AIProviderStatus
   }
   const link = (label: string, url: string) => <a className="text-accent underline" href={url} target="_blank" rel="noreferrer">Open the {label} sign-in page</a>;
   return <Modal title="AI accounts" onClose={close}>
-    <p className="mb-4 text-sm text-muted">Tao uses your own Codex or Claude subscription. Requests go to the provider&apos;s hosted models and count toward your plan&apos;s limits.</p>
+    <p className="mb-4 text-sm text-muted">Tao uses your own Codex, Claude, or OpenCode subscription. OpenCode signs in to one of many providers, such as OpenCode Go, GitHub Copilot, or an API key. Requests go to the provider&apos;s hosted models and count toward your plan&apos;s limits.</p>
     <List>{providers.map(provider => <ListItem key={provider.id} className="flex-wrap">
-      <div className="flex min-w-0 flex-1 flex-col"><strong className="font-semibold">{provider.label}</strong><span className="text-sm text-muted">{!provider.running ? "Sidecar not running" : provider.signedIn ? "Signed in" : "Not signed in"}</span></div>
+      <div className="flex min-w-0 flex-1 flex-col"><strong className="font-semibold">{provider.label}</strong><span className="text-sm text-muted">{!provider.running ? "Sidecar not running" : provider.signedIn ? ["Signed in", provider.accounts.join(", ")].filter(Boolean).join(": ") : "Not signed in"}</span></div>
+      {provider.running && !provider.signedIn && provider.id === "opencode" && <Select className="min-w-0 max-w-56 max-sm:order-last max-sm:w-full max-sm:max-w-none" aria-label="OpenCode provider" value={account} onChange={e => { setAccount(e.target.value); if (signIn?.provider === "opencode") setSignIn(null); }}>
+        {accounts.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </Select>}
       {provider.running && (provider.signedIn
         ? <Button disabled={busy === provider.id} onClick={() => void act(provider.id, "logout")}>Sign out</Button>
         : <Button variant="primary" disabled={busy === provider.id} onClick={() => void act(provider.id, "start")}>{signIn?.provider === provider.id ? "Restart" : "Sign in"}</Button>)}
       {signIn?.provider === provider.id && <div className="w-full pb-2 text-sm leading-relaxed">
-        {signIn.needsCode
+        {signIn.needsKey
+          ? <form className="flex gap-2" onSubmit={e => { e.preventDefault(); void act(provider.id, "code"); }}><Input className="flex-1" type="password" aria-label={`${accounts.find(option => option.id === account)?.name ?? provider.label} API key`} placeholder="API key" value={code} onChange={e => setCode(e.target.value)} autoFocus /><Button type="submit" variant="primary" disabled={!code.trim() || busy === provider.id}>{busy === provider.id ? "Saving…" : "Save"}</Button></form>
+          : signIn.needsCode
           ? <><p>1. {link(provider.label, signIn.url)} and approve access.<br />2. Paste the code it shows:</p>
             <form className="mt-2 flex gap-2" onSubmit={e => { e.preventDefault(); void act(provider.id, "code"); }}><Input className="flex-1" aria-label={`${provider.label} sign-in code`} value={code} onChange={e => setCode(e.target.value)} autoFocus /><Button type="submit" variant="primary" disabled={!code.trim() || busy === provider.id}>{busy === provider.id ? "Checking…" : "Finish"}</Button></form></>
           : <p>1. {link(provider.label, signIn.url)}.<br />2. Enter this code: <code className="rounded-md bg-subtle px-2 py-1 font-mono">{signIn.code}</code><br /><span className="mt-2 inline-flex items-center gap-2 text-muted"><Spinner />Waiting for approval…</span></p>}

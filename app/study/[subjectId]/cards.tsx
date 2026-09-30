@@ -82,7 +82,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
 
   async function askTutor(message: string) {
     if (!card) throw new Error("No card is open.");
-    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to Codex or Claude to continue."); }
+    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to continue."); }
     return api<{ reply: string; diagram: DiagramData | null }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ message, revealed }) })
       .then((result) => ({ text: result.reply, diagram: result.diagram }));
   }

@@ -1,4 +1,4 @@
-import { AI_PROVIDERS, callBridge, type AiProvider } from "@/lib/ai";
+import { callBridge, providerForModel } from "@/lib/ai";
 
 type Usage = { usedPercent: number | null; windowDurationMins: number | null; resetsAt: number | null; lifetimeTokens: number | null };
 
@@ -6,7 +6,7 @@ type Usage = { usedPercent: number | null; windowDurationMins: number | null; re
 export async function GET(request: Request) {
   const model = new URL(request.url).searchParams.get("model") ?? "";
   try {
-    const provider = (Object.keys(AI_PROVIDERS) as AiProvider[]).find(id => AI_PROVIDERS[id].models.includes(model));
+    const provider = providerForModel(model);
     if (!provider) throw new Error("Usage unavailable");
     const data = await callBridge<Partial<Usage>>(provider, "GET", "/usage", undefined, 15_000);
     const usedPercent = Number.isInteger(data.usedPercent) && data.usedPercent! >= 0 && data.usedPercent! <= 100 ? data.usedPercent! : null;

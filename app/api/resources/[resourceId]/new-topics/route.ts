@@ -9,7 +9,7 @@ type RouteContext = { params: Promise<{ resourceId: string }> };
 export async function POST(request: Request, { params }: RouteContext) {
   const { resourceId } = await params;
   if (!isUuid(resourceId)) return jsonError("Resource not found", 404);
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude to suggest topics", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account to suggest topics", 409);
   const result = await query<{ subjectId: string; filename: string; extractedText: string }>(`SELECT subject_id AS "subjectId", filename, extracted_text AS "extractedText"
     FROM resources WHERE id = $1 AND owner_id = $2`, [resourceId, LOCAL_OWNER_ID]);
   const resource = result.rows[0];

@@ -103,7 +103,7 @@ export async function postStudyChat(target: ChatTarget, id: string, request: Req
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (body.summarize !== true && (!message || message.length > 2000)) return jsonError("Message must be 1–2,000 characters");
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before chatting", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account before chatting", 409);
   if (!await owned(target, id)) return jsonError(notFound[target], 404);
   // The tutor reads its earlier figures as their descriptions.
   const { summary, messages } = sinceSummary((await chatMessages(parents[target], id)).map((item) => ({ role: item.role, text: withFigure(item.text, item.diagram) })));

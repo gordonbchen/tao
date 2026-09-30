@@ -318,7 +318,7 @@ function SubjectContent() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not summarize this folder";
       setGroupErrors((current) => ({ ...current, [groupId]: message }));
-      if (/Codex or Claude/i.test(message)) notifyAiSetupRequired();
+      if (/Sign in to an AI account|(Codex|Claude|OpenCode) is (unavailable|not signed in)/i.test(message)) notifyAiSetupRequired();
     } finally { setSummarizingGroupIds((current) => current.filter((item) => item !== groupId)); }
   }
 
@@ -458,7 +458,7 @@ function SubjectContent() {
 
   async function generateTopicSummary(topicId: string) {
     if (!aiSettings.ready) return;
-    if (!aiSettings.configured) { notifyAiSetupRequired(); setTopicSummaryError(topicId, "Sign in to Codex or Claude to create a topic summary."); return; }
+    if (!aiSettings.configured) { notifyAiSetupRequired(); setTopicSummaryError(topicId, "Sign in to an AI account to create a topic summary."); return; }
     if (summariesInProgress.current.has(topicId)) { summariesQueued.current.add(topicId); return; }
     summariesInProgress.current.add(topicId);
     setSummarizingTopicIds((current) => [...current, topicId]);
@@ -473,7 +473,7 @@ function SubjectContent() {
         } catch (e) {
           const message = e instanceof Error ? e.message : "Could not create a topic summary";
           setTopicSummaryError(topicId, message);
-          if (/Codex or Claude|(Codex|Claude) is (unavailable|not signed in)/i.test(message)) notifyAiSetupRequired();
+          if (/Sign in to an AI account|(Codex|Claude|OpenCode) is (unavailable|not signed in)/i.test(message)) notifyAiSetupRequired();
           setTopicDetail((current) => current?.id === topicId ? { ...current, summaryStatus: "failed" } : current);
           break;
         }
@@ -546,7 +546,7 @@ function SubjectContent() {
     if (!aiSettings.ready) return;
     if (!aiSettings.configured) {
       notifyAiSetupRequired();
-      setSummaryError("Sign in to Codex or Claude to create a resource summary.");
+      setSummaryError("Sign in to an AI account to create a resource summary.");
       return;
     }
     if (resourceSummariesInProgress.has(resourceId)) return;
@@ -560,7 +560,7 @@ function SubjectContent() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not create a resource summary";
       setSummaryError(message);
-      const setupRequired = /Codex or Claude|(Codex|Claude) is (unavailable|not signed in)/i.test(message);
+      const setupRequired = /Sign in to an AI account|(Codex|Claude|OpenCode) is (unavailable|not signed in)/i.test(message);
       if (setupRequired) notifyAiSetupRequired();
       setResourceText((current) => current?.id === resourceId ? { ...current, summaryStatus: setupRequired ? "not_generated" : "failed" } : current);
       setError(message);

@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   const problem = problemResult.rows[0];
   if (!problem) return jsonError("Problem not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before asking for hints", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account before asking for hints", 409);
   const previous = await query<{ content: string; diagram: Diagram | null }>("SELECT content, diagram FROM tutor_messages WHERE problem_id = $1 AND kind = 'hint' ORDER BY created_at", [problemId]);
   const count = previous.rows.length;
   const hasProvider = hasAiProvider();

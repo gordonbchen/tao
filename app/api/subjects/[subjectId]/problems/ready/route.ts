@@ -11,7 +11,7 @@ type RouteContext = { params: Promise<{ subjectId: string }> };
 export async function POST(request: Request, { params }: RouteContext) {
   const { subjectId } = await params;
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
-  if (!hasAiProvider()) return jsonError("Sign in to Codex or Claude before practicing", 409);
+  if (!hasAiProvider()) return jsonError("Sign in to an AI account before practicing", 409);
   let body: { topicIds?: unknown; groupIds?: unknown } = {};
   try { body = await request.json(); } catch {}
   const selection = selectionFromBody(body);
