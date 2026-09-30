@@ -110,16 +110,20 @@ export async function checkAnswer(problem: { prompt: string; solution: string },
 }
 
 // A tutor reply in any chat: text plus an optional figure. Empty when the model returned no usable text.
-export type ChatReply = { text: string; diagram: Diagram | null };
-const CHAT_REPLY = "Return JSON with reply, a string containing your reply, and diagram.";
+// `title` names a new conversation; it is empty unless one was asked for.
+export type ChatReply = { text: string; diagram: Diagram | null; title: string };
+const CHAT_REPLY = "Return JSON with reply, a string containing your reply, diagram, and title.";
+const NO_TITLE = "Set title to an empty string.";
 
 async function chatReply(system: string, input: object, limit: number, options: AiOptions): Promise<ChatReply | undefined> {
-  const { value } = await jsonFromConfiguredProvider<{ reply: unknown; diagram: unknown }>(system, JSON.stringify(input), "chat", options);
-  return typeof value.reply === "string" && value.reply.trim() ? { text: value.reply.slice(0, limit), diagram: cleanDiagram(value.diagram) } : undefined;
+  const { value } = await jsonFromConfiguredProvider<{ reply: unknown; diagram: unknown; title: unknown }>(system, JSON.stringify(input), "chat", options);
+  if (typeof value.reply !== "string" || !value.reply.trim()) return undefined;
+  const title = typeof value.title === "string" ? value.title.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  return { text: value.reply.slice(0, limit), diagram: cleanDiagram(value.diagram), title };
 }
 
 export async function suggestHint(problem: { prompt: string; solution: string }, studentMessage: string, previousHints: string[], options: AiOptions = {}) {
-  return chatReply(`Act as a patient tutor. Give one small, incremental hint that responds to where the student is stuck. Do not reveal the answer or full solution. ${CHAT_REPLY} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions("The figure must not reveal the answer or the solution's key step.")}`,
+  return chatReply(`Act as a patient tutor. Give one small, incremental hint that responds to where the student is stuck. Do not reveal the answer or full solution. ${CHAT_REPLY} ${NO_TITLE} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions("The figure must not reveal the answer or the solution's key step.")}`,
     { problem: problem.prompt, solution: problem.solution, earlierHints: previousHints, studentMessage }, 1200, options);
 }
 
@@ -138,14 +142,14 @@ export async function generateCards(context: { subject: string; topic: string; c
 export async function tutorCard(card: { front: string; back: string }, revealed: boolean, studentMessage: string, previous: string[], options: AiOptions = {}) {
   return chatReply(`Act as a patient tutor helping a student with one flashcard. ${revealed
       ? "The student has seen the answer. Explain, give intuition or an example, or answer their question about it."
-      : "The student has not seen the answer yet. Give a small hint or respond to their question without revealing the answer on the back."} Keep replies short. ${CHAT_REPLY} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions(revealed ? "" : "The figure must not show or label the answer on the back.")}`,
+      : "The student has not seen the answer yet. Give a small hint or respond to their question without revealing the answer on the back."} Keep replies short. ${CHAT_REPLY} ${NO_TITLE} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions(revealed ? "" : "The figure must not show or label the answer on the back.")}`,
     { front: card.front, back: card.back, earlierReplies: previous, studentMessage }, 2000, options);
 }
 
 // One reply in an open conversation about a topic, folder, or resource, grounded in the supplied material.
-// `earlierSummary` stands in for the conversation before `conversation`.
-export async function chatAbout(material: object, earlierSummary: string | undefined, conversation: { role: string; text: string }[], studentMessage: string, options: AiOptions = {}) {
-  return chatReply(`Act as a knowledgeable, friendly tutor talking with a student about their course or part of it. The material is what their course covers; base answers on it, and say so when you go beyond it or when it does not cover the question. Explain, give examples or intuition, compare ideas, or quiz the student when asked. The material may include the student's study records (review schedule, problem attempts and ratings, flashcard reviews); use them for questions about progress, weak areas, or what to study next, and say what the records show rather than guessing when they are thin. Keep replies short unless the student asks for more. ${CHAT_REPLY} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions()}`,
+// `earlierSummary` stands in for the conversation before `conversation`. With `name`, the reply also titles the conversation.
+export async function chatAbout(material: object, earlierSummary: string | undefined, conversation: { role: string; text: string }[], studentMessage: string, name: boolean, options: AiOptions = {}) {
+  return chatReply(`Act as a knowledgeable, friendly tutor talking with a student about their course or part of it. The material is what their course covers; base answers on it, and say so when you go beyond it or when it does not cover the question. Explain, give examples or intuition, compare ideas, or quiz the student when asked. The material may include the student's study records (review schedule, problem attempts and ratings, flashcard reviews); use them for questions about progress, weak areas, or what to study next, and say what the records show rather than guessing when they are thin. Keep replies short unless the student asks for more. ${CHAT_REPLY} ${name ? "Set title to a plain name of two to six words for this conversation, like a heading a student would scan for later, without quotes or final punctuation." : NO_TITLE} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions()}`,
     { material, earlierSummary, conversation, studentMessage }, 4000, options);
 }
 

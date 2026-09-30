@@ -91,11 +91,12 @@ export function Modal({ title, label, subtitle, onClose, wide, children }: Modal
     return () => { window.removeEventListener("keydown", onKeyDown); openModals.splice(openModals.indexOf(token), 1); };
   }, []);
   // Rendered into <body> so no ancestor's stacking context (a sticky chat, a card) can draw over it.
-  // Wide dialogs fill a narrow screen instead of floating in it.
+  // Wide dialogs fill a narrow screen instead of floating in it. They are flex columns, so a panel that may shrink
+  // (min-h-0) can fill exactly the height left under the title and tabs, like a viewer's chat.
   return createPortal(<div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden max-sm:p-0" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div role="dialog" aria-modal="true" aria-label={label ?? (typeof title === "string" ? title : undefined)} className={cn(
       "w-full overflow-auto rounded-lg border border-line bg-paper p-6 shadow-float max-sm:p-4",
-      wide ? "max-h-[calc(100dvh-40px)] max-w-7xl max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none max-sm:border-0" : "max-h-[90vh] max-w-lg",
+      wide ? "flex max-h-[calc(100dvh-48px)] max-w-7xl flex-col max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none max-sm:border-0" : "max-h-[90vh] max-w-lg",
     )}>
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="min-w-0"><h2 className="text-xl font-semibold break-words">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
