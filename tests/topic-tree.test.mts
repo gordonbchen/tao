@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTree, cleanPath, descendantGroupIds, flattenTree, groupPath, outline, parsePlacements, pathsBesideTopics, positionAt, siblingPositions, treeFromPaths } from "../lib/topic-tree.ts";
+import { buildTree, cleanPath, descendantGroupIds, flattenTree, groupPath, outline, parsePlacements, parseTopicNames, pathsBesideTopics, placeInTree, positionAt, siblingPositions } from "../lib/topic-tree.ts";
 
 const groups = [
   { id: "analysis", name: "Analysis", parentId: null },
@@ -51,17 +51,26 @@ test("cleans model placements: trims, drops blanks and duplicates, limits depth"
   assert.throws(() => parsePlacements({ topics: "Limits" }, 12));
 });
 
-test("turns proposed paths into a previewable tree, merging folder names case-insensitively", () => {
-  const preview = treeFromPaths([
-    { id: "t1", name: "Limits", path: ["Analysis", "Sequences"] },
-    { id: "t2", name: "Series", path: ["analysis", "sequences"] },
-    { id: "t3", name: "Groups", path: [] },
+test("places proposed topics into the existing tree, reusing folders case-insensitively and adding new ones last", () => {
+  const preview = placeInTree(groups, topics.slice(0, 3), [
+    { id: "n1", name: "Limits", path: ["analysis", "SEQUENCES"] },
+    { id: "n2", name: "Rings", path: ["Algebra", "Rings and fields"] },
+    { id: "n3", name: "Fields", path: ["algebra", "rings and fields"] },
+    { id: "n4", name: "Logic", path: [] },
   ]);
-  assert.equal(preview.groups.length, 2);
+  assert.equal(preview.groups.length, groups.length + 1);
   assert.deepEqual(outline(buildTree(preview.groups, preview.topics)), [
-    { folder: "Analysis", contents: [{ folder: "Sequences", contents: ["Limits", "Series"] }] },
-    "Groups",
+    { folder: "Analysis", contents: [{ folder: "Sequences", contents: ["Cauchy sequences", "Limits"] }, "Continuity"] },
+    { folder: "Algebra", contents: [{ folder: "Rings and fields", contents: ["Rings", "Fields"] }] },
+    "Cardinality",
+    "Logic",
   ]);
+});
+
+test("reads suggested topic names, dropping blanks, junk, and case-insensitive duplicates", () => {
+  assert.deepEqual(parseTopicNames({ topics: [" Limits ", "limits", "x", 3, "Group  actions"] }, 12), ["Limits", "Group actions"]);
+  assert.deepEqual(parseTopicNames({ topics: ["A1", "B2", "C3"] }, 2), ["A1", "B2"]);
+  assert.throws(() => parseTopicNames({ topics: "Limits" }, 12));
 });
 
 test("sorts folders and topics together by position, keeping folders first on ties", () => {

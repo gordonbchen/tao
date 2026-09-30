@@ -1,7 +1,7 @@
 import { aiErrorResponse, aiOptionsFromRequest, hasAiProvider } from "@/lib/ai";
 import { suggestTopicsWithAi } from "@/lib/ai-topic-suggestions";
 import { isUuid, jsonError, LOCAL_OWNER_ID, query } from "@/lib/db";
-import { treeOutline } from "@/lib/topic-groups";
+import { topicNames } from "@/lib/topic-groups";
 
 type RouteContext = { params: Promise<{ resourceId: string }> };
 
@@ -17,11 +17,11 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!resource.extractedText.trim()) return jsonError("This resource has no selectable text to suggest topics from.", 422);
   try {
     const [suggested, linked] = await Promise.all([
-      suggestTopicsWithAi(resource.filename, resource.extractedText, await treeOutline(resource.subjectId), aiOptionsFromRequest(request)),
+      suggestTopicsWithAi(resource.filename, resource.extractedText, await topicNames(resource.subjectId), aiOptionsFromRequest(request)),
       query<{ name: string }>("SELECT t.name FROM topic_resources tr JOIN topics t ON t.id = tr.topic_id WHERE tr.resource_id = $1", [resourceId]),
     ]);
     const linkedNames = new Set(linked.rows.map((topic) => topic.name.toLocaleLowerCase()));
-    return Response.json({ topics: suggested.filter((topic) => !linkedNames.has(topic.name.toLocaleLowerCase())) });
+    return Response.json({ topics: suggested.filter((name) => !linkedNames.has(name.toLocaleLowerCase())) });
   } catch (error) {
     return aiErrorResponse(error, "suggest topics");
   }

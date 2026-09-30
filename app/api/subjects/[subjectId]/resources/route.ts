@@ -6,8 +6,7 @@ import { ownsSubject } from "@/lib/domain";
 import { suggestTopics } from "@/lib/topic-suggestions";
 import { aiOptionsFromRequest, hasAiProvider } from "@/lib/ai";
 import { suggestTopicsWithAi } from "@/lib/ai-topic-suggestions";
-import { treeOutline } from "@/lib/topic-groups";
-import type { Placement } from "@/lib/topic-tree";
+import { topicNames } from "@/lib/topic-groups";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ subjectId: string }> };
@@ -53,11 +52,11 @@ export async function POST(request: Request, { params }: RouteContext) {
       RETURNING id, filename, content_type AS "contentType", extraction_status AS "extractionStatus",
         summary_status AS "summaryStatus", created_at AS "createdAt"`,
     [id, subjectId, LOCAL_OWNER_ID, path.basename(uploaded.name).slice(0, 255), pdf ? "application/pdf" : "text/plain", storagePath, extractedText, extractionStatus]);
-    // Heading suggestions go to the top level; the model places its suggestions in the folder tree.
-    let suggestedTopics: Placement[] = suggestTopics(extractedText, uploaded.name).map((name) => ({ name, path: [] }));
+    // Headings are the fallback when the model cannot suggest topics.
+    let suggestedTopics = suggestTopics(extractedText, uploaded.name);
     if (extractedText.trim() && hasAiProvider()) {
       try {
-        const fromAi = await suggestTopicsWithAi(uploaded.name, extractedText, await treeOutline(subjectId), aiOptionsFromRequest(request));
+        const fromAi = await suggestTopicsWithAi(uploaded.name, extractedText, await topicNames(subjectId), aiOptionsFromRequest(request));
         if (fromAi.length) suggestedTopics = fromAi;
       } catch { /* Keep the quick heading fallback when AI cannot suggest topics. */ }
     }

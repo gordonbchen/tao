@@ -3,15 +3,18 @@
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { BookOpen, BookPlus, Check, Ellipsis, Layers, Play, ChevronRight, Folder, FolderOpen, FolderPlus, Pencil, Trash2, X } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, MAX_DEPTH, positionAt, siblingPositions, type TreeNode } from "@/lib/topic-tree";
-import { cn, ContextMenu, IconButton, Input, Select, type MenuItem } from "../../ui";
+import { Badge, cn, ContextMenu, IconButton, Input, Select, type MenuItem } from "../../ui";
 
 export type Group = { id: string; name: string; parentId: string | null; position?: number };
-export type Topic = { id: string; name: string; groupId: string | null; position?: number; summaryStatus?: string };
+export type Topic = { id: string; name: string; groupId: string | null; position?: number; summaryStatus?: string; unorganized?: boolean };
 export type TreeItem = { kind: "group" | "topic"; id: string };
+// Stands in for a folder ID where a topic moves out of the tree, as in the edit row's folder select.
+export const UNORGANIZED = "unorganized";
 
 export type TreeActions = {
   openTopic: (topic: Topic) => void;
   openGroup: (group: Group) => void;
+  // `groupId` is UNORGANIZED to move the topic out of the tree.
   saveTopic: (topic: Topic, name: string, groupId: string | null) => void;
   saveGroup: (group: Group, name: string, parentId: string | null) => void;
   removeTopic: (topic: Topic) => void;
@@ -20,6 +23,8 @@ export type TreeActions = {
   addFolder: (parentId: string | null) => void;
   addTopic: (groupId: string) => void;
   move: (item: TreeItem, parentId: string | null, position: number) => void;
+  // Moves a topic, or every topic inside a folder, to Unorganized.
+  unorganize: (item: TreeItem) => void;
   editingId: string | null;
   renameOnly: boolean;
   setEditingId: (id: string | null) => void;
@@ -33,7 +38,13 @@ type DropRow = { key: string; id: string | null; parentId: string | null; depth:
 
 type TopicTreeProps = {
   groups: Group[];
+  // Topics in the tree; unorganized topics are listed after it.
   topics: Topic[];
+  unorganized?: Topic[];
+  // Shown beside the Unorganized heading, such as the Organize button.
+  unorganizedAction?: ReactNode;
+  // Topics marked New, as in the Organize preview.
+  newIds?: Set<string>;
   collapsed: Set<string>;
   onToggle: (groupId: string) => void;
   // Without actions the tree is a read-only preview.
@@ -47,8 +58,10 @@ const indent = (depth: number) => ({ paddingLeft: depth * 24 });
 
 // Collapsible folders of topics. Dragging a row onto the top or bottom edge of another row places it before or
 // after that row; dropping on a folder's middle puts it last inside. The edit form's folder select moves without a pointer. Right-click (or the context-menu key) on a row
-// offers practice, flashcards, edit, new topic or folder, and delete.
-export function TopicTree({ groups, topics, collapsed, onToggle, actions, highlightId }: TopicTreeProps) {
+// offers practice, flashcards, edit, new topic or folder, and delete. Topics drag in and out of the Unorganized list below
+// the tree, which is always shown in the editable tree; dropping a folder there moves the topics inside it and deletes
+// the folder, after a warning.
+export function TopicTree({ groups, topics, unorganized = [], unorganizedAction, newIds, collapsed, onToggle, actions, highlightId }: TopicTreeProps) {
   const nodes = buildTree(groups, topics);
   const folders = flattenTree(nodes).filter((node) => node.kind === "group");
   const [dragged, setDragged] = useState<TreeItem | null>(null);
@@ -70,6 +83,7 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
     setMenu({ x: rect.right, y: rect.bottom, label, items });
   }}><Ellipsis size={18} /></IconButton>;
 
+  const draggedUnorganized = Boolean(dragged && unorganized.some((topic) => topic.id === dragged.id));
   const canDrop = (parentId: string | null) =>
     Boolean(dragged && (dragged.kind === "topic" || !parentId || !descendantGroupIds(groups, dragged.id).has(parentId)));
   // A topic row's top half is before it and its bottom half after it. A folder row splits into thirds: before,
@@ -109,6 +123,22 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
       if (dragged && place) actions.move(dragged, place.parentId, place.position);
     },
   } : {};
+  const unorganizedDropProps = actions ? {
+    onDragOver: (event: DragEvent) => {
+      if (!dragged || draggedUnorganized) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (dropTarget?.key !== "unorganized") setDropTarget({ key: "unorganized", mode: "inside", lineDepth: 0 });
+    },
+    onDragLeave: (event: DragEvent) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget((current) => current?.key === "unorganized" ? null : current);
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      setDropTarget(null);
+      if (dragged && !draggedUnorganized) actions.unorganize(dragged);
+    },
+  } : {};
   // Inside is a tinted row; before and after draw an accent line on that edge, indented to the level the item lands at.
   const dropClass = (key: string) => dropTarget?.key !== key ? undefined : dropTarget.mode === "inside" ? "bg-accent-soft"
     : cn("relative before:absolute before:right-0 before:left-(--drop-indent) before:h-0.5 before:bg-accent", dropTarget.mode === "before" ? "before:-top-px" : "before:-bottom-px");
@@ -126,34 +156,37 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
 
   const editForm = (kind: "topic" | "folder", id: string, name: string, parentId: string | null, save: (name: string, parentId: string | null) => void) => {
     const excluded = kind === "folder" ? descendantGroupIds(groups, id) : new Set<string>();
-    return <EditForm key={id} kind={kind} name={name} parentId={parentId} renameOnly={actions?.renameOnly} onSave={save} onCancel={() => actions?.setEditingId(null)}
+    return <EditForm key={id} kind={kind} name={name} parentId={parentId} renameOnly={actions?.renameOnly} onSave={save} onCancel={() => actions?.setEditingId(null)} canUnorganize={kind === "topic"}
       folders={folders.filter((folder) => !excluded.has(folder.group.id)).map((folder) => ({ id: folder.group.id, name: folder.group.name, depth: folder.depth }))} />;
   };
 
+  // Unorganized rows take drops through their list, so they have no drop handling of their own.
+  const topicRow = (topic: Topic, depth: number, exit?: Place, isUnorganized = false) => {
+    const key = `topic:${topic.id}`;
+    const items: MenuItem[] = actions ? [
+      { label: "Practice", icon: <Play size={16} />, onSelect: () => actions.practice({ topicId: topic.id }, "problems") },
+      { label: "Flashcards", icon: <Layers size={16} />, onSelect: () => actions.practice({ topicId: topic.id }, "cards") },
+      { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(topic.id) },
+      ...(isUnorganized ? [] : [{ label: "New folder here", icon: <FolderPlus size={16} />, disabled: depth >= MAX_DEPTH, onSelect: () => actions.addFolder(topic.groupId) }]),
+      { label: "Delete", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeTopic(topic) },
+    ] : [];
+    return <li key={key}>
+      <div className={cn(row, dropClass(key), highlightId === topic.id && "animate-flash")} style={rowStyle(key, depth)}
+        {...dragProps({ kind: "topic", id: topic.id })} {...(isUnorganized ? {} : dropProps({ key, id: topic.id, parentId: topic.groupId, depth, exit }))} {...menuProps(topic.name, items)}>
+        {groups.length > 0 && <span className="size-control-sm flex-none" />}
+        {actions?.editingId === topic.id ? editForm("topic", topic.id, topic.name, isUnorganized ? UNORGANIZED : topic.groupId, (name, groupId) => actions.saveTopic(topic, name, groupId)) : <>
+          <button type="button" className={rowTitle} disabled={!actions} onClick={() => actions?.openTopic(topic)} title={actions && "View topic summary and linked resources. Right-click for more."}>
+            <BookOpen size={18} className="flex-none text-muted" /><span className="truncate">{topic.name}</span>
+            {newIds?.has(topic.id) && <Badge>New</Badge>}
+          </button>
+          {moreButton(topic.name, items)}
+        </>}
+      </div>
+    </li>;
+  };
+
   const render = (node: TreeNode<Group, Topic>, depth: number, exit?: Place): ReactNode => {
-    if (node.kind === "topic") {
-      const { topic } = node;
-      const key = `topic:${topic.id}`;
-      const items: MenuItem[] = actions ? [
-        { label: "Practice", icon: <Play size={16} />, onSelect: () => actions.practice({ topicId: topic.id }, "problems") },
-        { label: "Flashcards", icon: <Layers size={16} />, onSelect: () => actions.practice({ topicId: topic.id }, "cards") },
-        { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(topic.id) },
-        { label: "New folder here", icon: <FolderPlus size={16} />, disabled: depth >= MAX_DEPTH, onSelect: () => actions.addFolder(topic.groupId) },
-        { label: "Delete", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeTopic(topic) },
-      ] : [];
-      return <li key={key}>
-        <div className={cn(row, dropClass(key), highlightId === topic.id && "animate-flash")} style={rowStyle(key, depth)}
-          {...dragProps({ kind: "topic", id: topic.id })} {...dropProps({ key, id: topic.id, parentId: topic.groupId, depth, exit })} {...menuProps(topic.name, items)}>
-          {groups.length > 0 && <span className="size-control-sm flex-none" />}
-          {actions?.editingId === topic.id ? editForm("topic", topic.id, topic.name, topic.groupId, (name, groupId) => actions.saveTopic(topic, name, groupId)) : <>
-            <button type="button" className={rowTitle} disabled={!actions} onClick={() => actions?.openTopic(topic)} title={actions && "View topic summary and linked resources. Right-click for more."}>
-              <BookOpen size={18} className="flex-none text-muted" /><span className="truncate">{topic.name}</span>
-            </button>
-            {moreButton(topic.name, items)}
-          </>}
-        </div>
-      </li>;
-    }
+    if (node.kind === "topic") return topicRow(node.topic, depth, exit);
     const { group, children, topicCount } = node;
     const key = `group:${group.id}`;
     const open = !collapsed.has(group.id);
@@ -195,9 +228,18 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
   };
 
   return <>
-    <ul className="border-t border-line">{nodes.map((node) => render(node, 0))}</ul>
-    {dragged && groups.length > 0 && <div {...dropProps({ key: "root", id: null, parentId: null, depth: 0 })} className={cn("mt-2 flex h-control items-center justify-center rounded-md border border-line text-sm text-muted transition-colors",
+    {nodes.length > 0 && <ul className="border-t border-line">{nodes.map((node) => render(node, 0))}</ul>}
+    {dragged && (groups.length > 0 || draggedUnorganized) && <div {...dropProps({ key: "root", id: null, parentId: null, depth: 0 })} className={cn("mt-2 flex h-control items-center justify-center rounded-md border border-line text-sm text-muted transition-colors",
       dropTarget?.key === "root" && "border-accent bg-accent-soft text-accent")}>Move to the end of the top level</div>}
+    {actions && <div className={cn(nodes.length > 0 && "mt-8")}>
+      <div className="mb-3 flex min-h-control items-center justify-between gap-4"><h3 className="text-lg font-semibold">Unorganized</h3>{unorganizedAction}</div>
+      <ul className={cn("border-t border-line transition-colors", dropTarget?.key === "unorganized" && "bg-accent-soft")} {...unorganizedDropProps}>
+        {unorganized.map((topic) => topicRow(topic, 0, undefined, true))}
+        {!unorganized.length && <li className="flex min-h-12 items-center border-b border-line py-2 text-sm text-muted">
+          {groups.length > 0 && <span className="size-control-sm flex-none" />}<span className="pl-2">Empty. New topics start here, and you can drag topics here.</span>
+        </li>}
+      </ul>
+    </div>}
     {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
   </>;
 }
@@ -207,13 +249,14 @@ type EditFormProps = {
   name: string;
   parentId: string | null;
   renameOnly?: boolean;
+  canUnorganize?: boolean;
   folders: { id: string; name: string; depth: number }[];
   onSave: (name: string, parentId: string | null) => void;
   onCancel: () => void;
 };
 
 // Renames an item and moves it to another folder in one step.
-function EditForm({ kind, name, parentId, renameOnly, folders, onSave, onCancel }: EditFormProps) {
+function EditForm({ kind, name, parentId, renameOnly, canUnorganize, folders, onSave, onCancel }: EditFormProps) {
   const [value, setValue] = useState(name);
   const [parent, setParent] = useState(parentId ?? "");
   return <form className="flex min-w-0 flex-1 flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); onSave(value.trim() || name, parent || null); }}
@@ -221,6 +264,7 @@ function EditForm({ kind, name, parentId, renameOnly, folders, onSave, onCancel 
     <Input className="min-w-40 flex-1" aria-label={kind === "topic" ? "Topic name" : "Folder name"} autoFocus onFocus={(event) => event.currentTarget.select()}
       maxLength={160} value={value} onChange={(event) => setValue(event.target.value)} />
     {!renameOnly && <Select className="max-w-56 max-sm:max-w-none max-sm:flex-1" aria-label="Folder" value={parent} onChange={(event) => setParent(event.target.value)}>
+      {canUnorganize && <option value={UNORGANIZED}>Unorganized</option>}
       <option value="">Top level</option>
       {folders.map((folder) => <option key={folder.id} value={folder.id}>{" ".repeat(folder.depth + 1)}{folder.name}</option>)}
     </Select>}

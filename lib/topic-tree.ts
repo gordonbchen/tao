@@ -96,6 +96,18 @@ export function parsePlacements(raw: unknown, limit: number): Placement[] {
   return [...placements.values()].slice(0, limit);
 }
 
+// Reads `{ topics: [name] }` from a model reply, keeping the first spelling of each name.
+export function parseTopicNames(raw: unknown, limit: number) {
+  const items = raw && typeof raw === "object" && "topics" in raw ? (raw as { topics: unknown }).topics : null;
+  if (!Array.isArray(items)) throw new Error("AI returned invalid topic names");
+  const names = new Map<string, string>();
+  for (const item of items) {
+    const name = typeof item === "string" ? cleanName(item) : "";
+    if (name.length >= 2 && !names.has(name.toLocaleLowerCase())) names.set(name.toLocaleLowerCase(), name);
+  }
+  return [...names.values()].slice(0, limit);
+}
+
 // Models sometimes file a new topic inside a "folder" named after an existing topic. Topics hold no topics, so such a
 // path is cut back to the level where that topic sits, placing the new topic beside it.
 export function pathsBesideTopics(placements: Placement[], tree: Outline[]): Placement[] {
@@ -112,18 +124,22 @@ export function pathsBesideTopics(placements: Placement[], tree: Outline[]): Pla
   });
 }
 
-// Turns topics with proposed paths into folders and topics, so a proposal renders like the real tree.
-// Folder IDs are derived from the path, and names match case-insensitively like stored folders.
-export function treeFromPaths<T extends { id: string; name: string }>(items: (T & { path: string[] })[]) {
-  const groups = new Map<string, TreeGroup>();
-  const topics = items.map(({ path, ...topic }) => {
+// Adds topics at proposed folder paths to an existing tree, so a proposal previews like the real tree. Path names match
+// existing folders case-insensitively, as stored folders do; missing folders become stand-ins with path-derived IDs.
+// Like the server, it puts new folders and topics last among their siblings.
+export function placeInTree(groups: TreeGroup[], topics: TreeTopic[], placed: { id: string; name: string; path: string[] }[]) {
+  const all: TreeGroup[] = [...groups];
+  const last = Number.MAX_SAFE_INTEGER;
+  const added = placed.map(({ path, ...topic }) => {
     let parentId: string | null = null;
     path.forEach((name, index) => {
+      const found = all.find((group) => group.parentId === parentId && group.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+      if (found) { parentId = found.id; return; }
       const id = JSON.stringify(path.slice(0, index + 1).map((part) => part.toLocaleLowerCase()));
-      if (!groups.has(id)) groups.set(id, { id, name, parentId });
+      all.push({ id, name, parentId, position: last });
       parentId = id;
     });
-    return { ...topic, groupId: parentId } as unknown as T & TreeTopic;
+    return { ...topic, groupId: parentId as string | null, position: last };
   });
-  return { groups: [...groups.values()], topics };
+  return { groups: all, topics: [...topics, ...added] };
 }

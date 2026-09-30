@@ -1,4 +1,4 @@
-import { isUuid, jsonError, LOCAL_OWNER_ID, query } from "@/lib/db";
+import { isUuid, jsonError, LOCAL_OWNER_ID, query, transaction } from "@/lib/db";
 import { getOwnedGroup, groupSummaryInput, groupSummaryStatus, subtreeCte } from "@/lib/topic-groups";
 import { cleanName } from "@/lib/topic-tree";
 
@@ -51,10 +51,17 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   }
 }
 
-// Removes the folder and everything inside it, including its topics and their review history.
-export async function DELETE(_request: Request, { params }: RouteContext) {
+// Removes the folder and everything inside it, including its topics and their review history. With `?keepTopics=1`,
+// the topics anywhere inside move to Unorganized first, keeping their summaries, links, and history.
+export async function DELETE(request: Request, { params }: RouteContext) {
   const { groupId } = await params;
-  if (!isUuid(groupId)) return jsonError("Folder not found", 404);
-  const result = await query(`DELETE FROM topic_groups g USING subjects s WHERE g.subject_id = s.id AND s.owner_id = $2 AND g.id = $1`, [groupId, LOCAL_OWNER_ID]);
-  return result.rowCount ? new Response(null, { status: 204 }) : jsonError("Folder not found", 404);
+  if (!isUuid(groupId) || !(await getOwnedGroup(groupId))) return jsonError("Folder not found", 404);
+  await transaction(async (client) => {
+    if (new URL(request.url).searchParams.get("keepTopics") === "1") {
+      await client.query(`${subtreeCte} UPDATE topics SET group_id = NULL, unorganized = true, position = extract(epoch FROM clock_timestamp())
+        WHERE group_id IN (SELECT id FROM subtree)`, [groupId]);
+    }
+    await client.query("DELETE FROM topic_groups WHERE id = $1", [groupId]);
+  });
+  return new Response(null, { status: 204 });
 }

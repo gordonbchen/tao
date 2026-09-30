@@ -9,7 +9,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
   const subjectResult = await query(`SELECT id, name, diagrams, created_at AS "createdAt" FROM subjects WHERE id = $1 AND owner_id = $2`, [subjectId, LOCAL_OWNER_ID]);
   if (!subjectResult.rows[0]) return jsonError("Subject not found", 404);
   const [topicsResult, groupsResult, resourcesResult] = await Promise.all([
-    query(`SELECT t.id, t.name, t.group_id AS "groupId", t.position, t.coverage_confirmed AS "coverageConfirmed", t.summary_status AS "summaryStatus",
+    query(`SELECT t.id, t.name, t.group_id AS "groupId", t.position, t.unorganized, t.coverage_confirmed AS "coverageConfirmed", t.summary_status AS "summaryStatus",
       json_build_object('dueAt', r.due_at, 'intervalDays', r.interval_days, 'repetitions', r.repetitions,
         'lastRating', r.last_rating, 'lastCorrectness', r.last_correctness) AS review
       FROM topics t LEFT JOIN topic_reviews r ON r.topic_id = t.id

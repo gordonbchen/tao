@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { briefFrom, generateStructuredText, type AiOptions } from "@/lib/ai";
 import { LOCAL_OWNER_ID, query } from "@/lib/db";
-import { buildTree, groupPath, outline, type TreeNode } from "@/lib/topic-tree";
+import { buildTree, groupPath, type TreeNode } from "@/lib/topic-tree";
 
 type Queryable = Pick<PoolClient, "query">;
 type GroupRow = { id: string; name: string; parentId: string | null; position: number; summary: string; brief: string };
-type TopicRow = { id: string; name: string; groupId: string | null; position: number; about: string };
+type TopicRow = { id: string; name: string; groupId: string | null; position: number; about: string; unorganized: boolean };
 
 // Recursive CTE naming a folder and every folder inside it as `subtree(id)`.
 export const subtreeCte = `WITH RECURSIVE subtree(id) AS (
@@ -41,14 +41,15 @@ export async function resolveGroupPath(client: Queryable, subjectId: string, pat
 export async function loadTree(subjectId: string) {
   const [groups, topics] = await Promise.all([
     query<GroupRow>(`SELECT id, name, parent_id AS "parentId", position, summary, brief FROM topic_groups WHERE subject_id = $1 ORDER BY position, created_at`, [subjectId]),
-    query<TopicRow>(`SELECT id, name, group_id AS "groupId", position, CASE WHEN brief <> '' THEN brief ELSE left(coverage_summary, 300) END AS about
+    query<TopicRow>(`SELECT id, name, group_id AS "groupId", position, unorganized, CASE WHEN brief <> '' THEN brief ELSE left(coverage_summary, 300) END AS about
       FROM topics WHERE subject_id = $1 ORDER BY position, created_at`, [subjectId]),
   ]);
-  return { groups: groups.rows, topics: topics.rows, nodes: buildTree(groups.rows, topics.rows) };
+  // Unorganized topics sit outside the folder tree.
+  return { groups: groups.rows, topics: topics.rows, nodes: buildTree(groups.rows, topics.rows.filter((topic) => !topic.unorganized)) };
 }
 
-export async function treeOutline(subjectId: string) {
-  return outline((await loadTree(subjectId)).nodes);
+export async function topicNames(subjectId: string) {
+  return (await query<{ name: string }>("SELECT name FROM topics WHERE subject_id = $1 ORDER BY position, created_at", [subjectId])).rows.map((topic) => topic.name);
 }
 
 function findNode(nodes: TreeNode<GroupRow, TopicRow>[], groupId: string): Extract<TreeNode<GroupRow, TopicRow>, { kind: "group" }> | undefined {

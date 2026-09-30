@@ -161,7 +161,7 @@ export async function summarizeChat(earlierSummary: string | undefined, conversa
   return typeof value.hint === "string" ? value.hint.slice(0, 4000) : undefined;
 }
 
-export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "group_summary" | "topic_placements" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
+export async function generateStructuredText(kind: "resource_summary" | "topic_summary" | "group_summary" | "topic_names" | "topic_placements" | "link_suggestions", system: string, input: string, options: AiOptions = {}) {
   return jsonFromConfiguredProvider<unknown>(system, input, kind, options);
 }
 import { request as httpRequest } from "node:http";

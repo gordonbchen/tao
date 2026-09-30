@@ -4,14 +4,14 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
-import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
+import { buildTree, descendantGroupIds, flattenTree, groupPath, placeInTree, positionAt, siblingPositions } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { SavedChat } from "../../chat";
 import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
-import { TopicTree, type Group, type Topic, type TreeActions } from "./topic-tree";
+import { TopicTree, UNORGANIZED, type Group, type Topic, type TreeActions, type TreeItem } from "./topic-tree";
 
-type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: Placement[] };
+type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: string[] };
 type LinkedTopic = { id: string; name: string };
 type LinkedResource = { id: string; filename: string };
 type GroupDetail = Group & { summary: string; summaryStatus: "not_generated" | "stale" | "complete"; summaryProvider?: string | null; summaryModel?: string | null; topicCount: number; resources: LinkedResource[] };
@@ -44,6 +44,8 @@ function SubjectContent() {
   const startEditing = (itemId: string | null, onlyRename = false) => { setEditingId(itemId); setRenameOnly(onlyRename); };
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [organizing, setOrganizing] = useState<{ topics: (Topic & { path: string[] })[] } | "loading" | null>(null);
+  // A folder dropped on Unorganized, waiting for the student to confirm that it will be deleted.
+  const [unfiling, setUnfiling] = useState<Group | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState<Set<string>>(new Set());
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,7 @@ function SubjectContent() {
   const [topicName, setTopicName] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
-  const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: Placement[] }[]>([]);
+  const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: string[] }[]>([]);
   const suggestions = suggestionQueue[0] ?? null;
   const [findingTopicsIds, setFindingTopicsIds] = useState<string[]>([]);
   // The resource whose request for new topics found none.
@@ -145,8 +147,11 @@ function SubjectContent() {
   }, [refresh]);
 
   // The tree drops topics and folders inside a removed folder, so everything below derives from it.
-  const tree = flattenTree(buildTree(groups, topics));
-  const visibleTopics = tree.flatMap((node) => node.kind === "topic" ? [node.topic] : []);
+  // Unorganized topics are listed after it.
+  const organizedTopics = topics.filter((topic) => !topic.unorganized);
+  const unorganizedTopics = topics.filter((topic) => topic.unorganized).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const tree = flattenTree(buildTree(groups, organizedTopics));
+  const visibleTopics = [...tree.flatMap((node) => node.kind === "topic" ? [node.topic] : []), ...unorganizedTopics];
   const visibleGroups = tree.flatMap((node) => node.kind === "group" ? [node.group] : []);
   // Have one any-topic practice problem generated and waiting so Practice opens without a delay.
   // Topic and folder practice (from the tree's menu) prepare their next problem once started.
@@ -183,7 +188,7 @@ function SubjectContent() {
     setBusy(true);
     setError("");
     try {
-      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name }) });
+      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name, unorganized: true }) });
       setTopicName("");
       await refresh();
       revealAndFlash(topic.id, topic.groupId);
@@ -198,13 +203,15 @@ function SubjectContent() {
   const failed = (fallback: string) => (e: unknown) => setError(e instanceof Error ? e.message : fallback);
 
   // Moves and renames apply at once and are then confirmed by a refresh.
-  // Without a position, an item moved to another folder goes last in it.
-  async function saveTopic(topic: Topic, name: string, groupId: string | null, position = endPosition(topic, groupId)) {
+  // Without a position, an item moved to another folder (or to Unorganized, given as UNORGANIZED) goes last in it.
+  async function saveTopic(topic: Topic, name: string, parentId: string | null, position = endPosition(topic, parentId)) {
     setEditingId(null);
-    if (name === topic.name && groupId === topic.groupId && position === topic.position) return;
-    setTopics((current) => current.map((item) => item.id === topic.id ? { ...item, name, groupId, position } : item));
+    if (name === topic.name && parentId === parentOf(topic) && position === topic.position) return;
+    const unorganized = parentId === UNORGANIZED;
+    const groupId = unorganized ? null : parentId;
+    setTopics((current) => current.map((item) => item.id === topic.id ? { ...item, name, groupId, position, unorganized } : item));
     revealAndFlash(topic.id, groupId);
-    await api(`/api/topics/${topic.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, groupId, position }) }).catch(failed("Could not save topic"));
+    await api(`/api/topics/${topic.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name, groupId, position, unorganized }) }).catch(failed("Could not save topic"));
     await refresh();
   }
 
@@ -217,10 +224,13 @@ function SubjectContent() {
     await refresh();
   }
 
+  const parentOf = (item: Group | Topic) => "parentId" in item ? item.parentId : item.unorganized ? UNORGANIZED : item.groupId;
+
   function endPosition(item: Group | Topic, parentId: string | null) {
-    if (parentId === ("parentId" in item ? item.parentId : item.groupId)) return item.position;
-    const siblings = siblingPositions(groups, topics, parentId, item.id);
-    return positionAt(siblings.map((sibling) => sibling.position), siblings.length);
+    if (parentId === parentOf(item)) return item.position;
+    const siblings = parentId === UNORGANIZED ? unorganizedTopics.map((topic) => topic.position ?? 0)
+      : siblingPositions(groups, organizedTopics, parentId, item.id).map((sibling) => sibling.position);
+    return positionAt(siblings, siblings.length);
   }
 
   function revealAndFlash(itemId: string, parentId: string | null) {
@@ -228,7 +238,20 @@ function SubjectContent() {
     flash(itemId);
   }
 
-  function moveItem(item: { kind: "group" | "topic"; id: string }, parentId: string | null, position: number) {
+  // A topic moves at once; a folder's topics move only after the warning that the folder will be deleted.
+  function unorganize(item: TreeItem) {
+    const topic = item.kind === "topic" ? topics.find((candidate) => candidate.id === item.id) : undefined;
+    if (topic) void saveTopic(topic, topic.name, UNORGANIZED);
+    else setUnfiling(groups.find((candidate) => candidate.id === item.id) ?? null);
+  }
+
+  async function unfileGroup(group: Group) {
+    setUnfiling(null);
+    await api(`/api/groups/${group.id}?keepTopics=1`, { method: "DELETE" }).catch(failed("Could not move the folder's topics"));
+    await refresh();
+  }
+
+  function moveItem(item: TreeItem, parentId: string | null, position: number) {
     const group = item.kind === "group" ? groups.find((candidate) => candidate.id === item.id) : undefined;
     const topic = item.kind === "topic" ? topics.find((candidate) => candidate.id === item.id) : undefined;
     if (group) void saveGroup(group, group.name, parentId, position);
@@ -323,18 +346,14 @@ function SubjectContent() {
     if (!organizing || organizing === "loading") return;
     const placements = organizing.topics.map(({ id: topicId, path }) => ({ id: topicId, path }));
     setOrganizing(null);
-    try {
-      await api(`/api/subjects/${id}/tree`, { method: "PUT", headers: json, body: JSON.stringify({ topics: placements }) });
-      setCollapsed(new Set());
-      try { localStorage.removeItem(collapsedKey); } catch { /* Nothing stored. */ }
-    } catch (e) { failed("Could not apply the new folders")(e); }
+    await api(`/api/subjects/${id}/tree`, { method: "PUT", headers: json, body: JSON.stringify({ topics: placements }) }).catch(failed("Could not place the topics"));
     await refresh();
   }
 
   const treeActions: TreeActions = {
     openTopic: (topic) => void showTopic(topic), openGroup: (group) => void showGroup(group),
     saveTopic: (topic, name, groupId) => void saveTopic(topic, name, groupId), saveGroup: (group, name, parentId) => void saveGroup(group, name, parentId),
-    removeTopic, removeGroup, practice: startPractice, addFolder: (parentId) => void addFolder(parentId), addTopic: (groupId) => void addTopicIn(groupId), move: moveItem, editingId, renameOnly, setEditingId: startEditing,
+    removeTopic, removeGroup, practice: startPractice, addFolder: (parentId) => void addFolder(parentId), addTopic: (groupId) => void addTopicIn(groupId), move: moveItem, unorganize, editingId, renameOnly, setEditingId: startEditing,
   };
 
   async function uploadFiles(fileList: FileList | null) {
@@ -522,7 +541,7 @@ function SubjectContent() {
     setFindingTopicsIds((current) => [...current, resourceId]);
     setResourceTopicsError(""); setNoNewTopicsId(null);
     try {
-      const result = await api<{ topics: Placement[] }>(`/api/resources/${resourceId}/new-topics`, { method: "POST", headers: getAiRequestHeaders() });
+      const result = await api<{ topics: string[] }>(`/api/resources/${resourceId}/new-topics`, { method: "POST", headers: getAiRequestHeaders() });
       if (!result.topics.length) { setNoNewTopicsId(resourceId); return; }
       setResourceText((current) => current?.id === resourceId ? null : current);
       setSuggestionQueue((current) => [...current.filter((entry) => entry.resource.id !== resourceId), { resource, topics: result.topics }]);
@@ -561,17 +580,17 @@ function SubjectContent() {
     }
   }
 
-  // Creates the suggested topic in its proposed folder (making folders as needed), or links the existing topic where it is.
-  async function addSuggestedTopic({ name, path }: Placement) {
+  // Creates the suggested topic in Unorganized, or links the existing topic where it is.
+  async function addSuggestedTopic(name: string) {
     const sourceResource = suggestions?.resource;
     if (!sourceResource) return;
     try {
-      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name, path }) });
+      const topic = await api<Topic>(`/api/subjects/${id}/topics`, { method: "POST", headers: json, body: JSON.stringify({ name, unorganized: true }) });
       await api(`/api/topics/${topic.id}/resources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceId: sourceResource.id }) });
       setResources((current) => current.map((resource) => resource.id === sourceResource.id ? { ...resource, topicIds: [...new Set([...(resource.topicIds ?? []), topic.id])] } : resource));
       setSuggestionQueue((current) => {
         if (!current.length || current[0].resource.id !== sourceResource.id) return current;
-        const remaining = current[0].topics.filter((topic) => topic.name !== name);
+        const remaining = current[0].topics.filter((topic) => topic !== name);
         return remaining.length ? [{ ...current[0], topics: remaining }, ...current.slice(1)] : current.slice(1);
       });
       await refresh();
@@ -653,13 +672,13 @@ function SubjectContent() {
         <section className="mb-12">
           <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
             <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
-              {topics.length > 1 && <Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready} title="Have the model propose folders for your topics"><Sparkles size={16} />Organize</Button>}
               <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
               <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
             </div>
           </div>
-          {tree.length > 0 && <TopicTree groups={groups} topics={topics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId} />}
-          {tree.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
+          {topics.length === 0 && groups.length === 0 && <p className="mb-8 text-muted">Add a topic to start practicing.</p>}
+          <TopicTree groups={groups} topics={organizedTopics} unorganized={unorganizedTopics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId}
+            unorganizedAction={<Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready || !unorganizedTopics.length} title="Have the model place these topics in your folders"><Sparkles size={16} />Organize</Button>} />
         </section>
 
         <section>
@@ -672,13 +691,13 @@ function SubjectContent() {
 
     {suggestions && <Modal title="Suggested topics" subtitle={suggestions.resource.filename} onClose={closeSuggestions}>
       <List>{suggestions.topics.map((suggestion) => {
-        const existing = topics.find((topic) => topic.name.toLocaleLowerCase() === suggestion.name.toLocaleLowerCase());
-        const path = existing ? groupPath(groups, existing.groupId) : suggestion.path;
-        const newFolders = existing ? 0 : suggestion.path.length - groupPath(groups, matchPath(groups, suggestion.path)).length;
-        return <ListItem key={suggestion.name}>
+        const existing = topics.find((topic) => topic.name.toLocaleLowerCase() === suggestion.toLocaleLowerCase());
+        const place = !existing ? "New topic, added to Unorganized" : existing.unorganized ? "Existing topic in Unorganized"
+          : `Existing topic in ${existing.groupId ? groupPath(groups, existing.groupId).join(" › ") : "the top level"}`;
+        return <ListItem key={suggestion}>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span>{existing?.name ?? suggestion.name}</span>
-            <span className="text-xs text-muted">{existing ? "Existing topic" : "New topic"} in {path.length ? path.join(" › ") : "the top level"}{newFolders > 0 && ` (${newFolders === 1 ? "new folder" : `${newFolders} new folders`})`}</span>
+            <span>{existing?.name ?? suggestion}</span>
+            <span className="text-xs text-muted">{place}</span>
           </div>
           <Button size="sm" onClick={() => addSuggestedTopic(suggestion)}>{existing ? <><Check size={16} />Link</> : <><Plus size={16} />Add</>}</Button>
         </ListItem>;
@@ -731,21 +750,32 @@ function SubjectContent() {
     </Modal>}
 
     {organizing && <Modal wide title="Organize topics" onClose={() => setOrganizing(null)}>
-      {organizing === "loading" ? pending("Proposing folders for your topics…") : (() => {
-        const preview = treeFromPaths(organizing.topics);
+      {organizing === "loading" ? pending("Placing your unorganized topics…") : (() => {
+        const preview = placeInTree(groups, organizedTopics, organizing.topics);
+        const left = unorganizedTopics.length - organizing.topics.length;
         return <>
-          <p className="mb-6 text-muted">Here is a proposed tree. Topics keep their summaries, resources, and review history. Folders left empty are removed.</p>
-          <TopicTree groups={preview.groups} topics={preview.topics} collapsed={previewCollapsed} onToggle={(groupId) => setPreviewCollapsed((current) => {
+          <p className="mb-6 text-muted">Here is where the unorganized topics would go, marked New. Nothing else moves.{left > 0 && ` The model did not place ${left === 1 ? "one topic, which stays" : `${left} topics, which stay`} in Unorganized.`}</p>
+          <TopicTree groups={preview.groups} topics={preview.topics} newIds={new Set(organizing.topics.map((topic) => topic.id))} collapsed={previewCollapsed} onToggle={(groupId) => setPreviewCollapsed((current) => {
             const next = new Set(current);
             if (!next.delete(groupId)) next.add(groupId);
             return next;
           })} />
-          <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setOrganizing(null)}>Cancel</Button><Button variant="primary" onClick={() => void applyOrganization()}>Apply</Button></div>
+          <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setOrganizing(null)}>Cancel</Button><Button variant="primary" disabled={!organizing.topics.length} onClick={() => void applyOrganization()}>Apply</Button></div>
         </>;
       })()}
     </Modal>}
 
-    {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
+    {unfiling && (() => {
+      const node = tree.find((item) => item.kind === "group" && item.group.id === unfiling.id);
+      const topicCount = node?.kind === "group" ? node.topicCount : 0;
+      const folderCount = descendantGroupIds(groups, unfiling.id).size - 1;
+      return <Modal title={`Move ${unfiling.name} to Unorganized?`} onClose={() => setUnfiling(null)}>
+        <p className="text-muted">{topicCount ? `Its ${topicCount === 1 ? "topic moves" : `${topicCount} topics move`} to Unorganized, keeping summaries, resources, and review history. ` : ""}The folder{folderCount > 0 && ` and the ${folderCount === 1 ? "folder" : `${folderCount} folders`} inside it`} will be deleted, with {folderCount > 0 ? "their summaries" : "its summary"} and chats. This cannot be undone.</p>
+        <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setUnfiling(null)}>Cancel</Button><Button variant="primary" onClick={() => void unfileGroup(unfiling)}>{topicCount ? "Move topics" : "Delete folder"}</Button></div>
+      </Modal>;
+    })()}
+
+    {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.unorganized ? "Unorganized" : topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
       <Tabs label="Topic content" actions={wide && topicTab === "summary" && chatToggle} value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
       {topicTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}</section>
@@ -824,16 +854,6 @@ function cycle<T>(items: readonly T[], current: T, step: number) {
 const sectionHead = "mb-3 flex min-h-control items-center justify-between gap-4";
 const rowTitle = "flex min-w-0 flex-1 items-center gap-3 self-stretch text-left hover:text-accent disabled:cursor-wait";
 
-// The deepest existing folder along `path`, matched case-insensitively like the server does.
-function matchPath(groups: Group[], path: string[]) {
-  let parentId: string | null = null;
-  for (const name of path) {
-    const next = groups.find((group) => group.parentId === parentId && group.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-    if (!next) break;
-    parentId = next.id;
-  }
-  return parentId;
-}
 const choiceRow = "flex h-full min-h-12 w-full items-center gap-3 text-left text-sm hover:text-accent";
 
 type LinkSuggestions = string[] | "loading" | "failed";
