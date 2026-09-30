@@ -96,6 +96,22 @@ export function parsePlacements(raw: unknown, limit: number): Placement[] {
   return [...placements.values()].slice(0, limit);
 }
 
+// Models sometimes file a new topic inside a "folder" named after an existing topic. Topics hold no topics, so such a
+// path is cut back to the level where that topic sits, placing the new topic beside it.
+export function pathsBesideTopics(placements: Placement[], tree: Outline[]): Placement[] {
+  const topics = new Set<string>();
+  const folders = new Set<string>();
+  const walk = (nodes: Outline[]) => nodes.forEach((node) => {
+    if (typeof node === "string") topics.add(node.toLocaleLowerCase());
+    else { folders.add(node.folder.toLocaleLowerCase()); walk(node.contents); }
+  });
+  walk(tree);
+  return placements.map((placement) => {
+    const cut = placement.path.findIndex((part) => topics.has(part.toLocaleLowerCase()) && !folders.has(part.toLocaleLowerCase()));
+    return cut < 0 ? placement : { ...placement, path: placement.path.slice(0, cut) };
+  });
+}
+
 // Turns topics with proposed paths into folders and topics, so a proposal renders like the real tree.
 // Folder IDs are derived from the path, and names match case-insensitively like stored folders.
 export function treeFromPaths<T extends { id: string; name: string }>(items: (T & { path: string[] })[]) {

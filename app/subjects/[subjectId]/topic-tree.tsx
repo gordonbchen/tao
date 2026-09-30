@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
-import { BookOpen, BookPlus, Check, Play, ChevronRight, Folder, FolderOpen, FolderPlus, Pencil, Trash2, X } from "lucide-react";
+import { BookOpen, BookPlus, Check, Ellipsis, Layers, Play, ChevronRight, Folder, FolderOpen, FolderPlus, Pencil, Trash2, X } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, MAX_DEPTH, positionAt, siblingPositions, type TreeNode } from "@/lib/topic-tree";
 import { cn, ContextMenu, IconButton, Input, Select, type MenuItem } from "../../ui";
 
@@ -16,7 +16,7 @@ export type TreeActions = {
   saveGroup: (group: Group, name: string, parentId: string | null) => void;
   removeTopic: (topic: Topic) => void;
   removeGroup: (group: Group) => void;
-  practice: (target: { topicId?: string; groupId?: string }) => void;
+  practice: (target: { topicId?: string; groupId?: string }, mode: "problems" | "cards") => void;
   addFolder: (parentId: string | null) => void;
   addTopic: (groupId: string) => void;
   move: (item: TreeItem, parentId: string | null, position: number) => void;
@@ -47,7 +47,7 @@ const indent = (depth: number) => ({ paddingLeft: depth * 24 });
 
 // Collapsible folders of topics. Dragging a row onto the top or bottom edge of another row places it before or
 // after that row; dropping on a folder's middle puts it last inside. The edit form's folder select moves without a pointer. Right-click (or the context-menu key) on a row
-// offers practice, edit, new topic or folder, and delete.
+// offers practice, flashcards, edit, new topic or folder, and delete.
 export function TopicTree({ groups, topics, collapsed, onToggle, actions, highlightId }: TopicTreeProps) {
   const nodes = buildTree(groups, topics);
   const folders = flattenTree(nodes).filter((node) => node.kind === "group");
@@ -64,6 +64,11 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
       setMenu({ x: keyboard ? rect.left + 24 : event.clientX, y: keyboard ? rect.bottom : event.clientY, label, items });
     },
   } : {};
+  // Touch screens have no right-click, so rows there get a button that opens the same menu.
+  const moreButton = (label: string, items: MenuItem[]) => actions && <IconButton size="sm" className="pointer-fine:hidden" label={`More for ${label}`} onClick={(event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ x: rect.right, y: rect.bottom, label, items });
+  }}><Ellipsis size={18} /></IconButton>;
 
   const canDrop = (parentId: string | null) =>
     Boolean(dragged && (dragged.kind === "topic" || !parentId || !descendantGroupIds(groups, dragged.id).has(parentId)));
@@ -129,19 +134,22 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
     if (node.kind === "topic") {
       const { topic } = node;
       const key = `topic:${topic.id}`;
+      const items: MenuItem[] = actions ? [
+        { label: "Practice", icon: <Play size={16} />, onSelect: () => actions.practice({ topicId: topic.id }, "problems") },
+        { label: "Flashcards", icon: <Layers size={16} />, onSelect: () => actions.practice({ topicId: topic.id }, "cards") },
+        { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(topic.id) },
+        { label: "New folder here", icon: <FolderPlus size={16} />, disabled: depth >= MAX_DEPTH, onSelect: () => actions.addFolder(topic.groupId) },
+        { label: "Delete", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeTopic(topic) },
+      ] : [];
       return <li key={key}>
         <div className={cn(row, dropClass(key), highlightId === topic.id && "animate-flash")} style={rowStyle(key, depth)}
-          {...dragProps({ kind: "topic", id: topic.id })} {...dropProps({ key, id: topic.id, parentId: topic.groupId, depth, exit })} {...menuProps(topic.name, actions ? [
-            { label: "Practice", icon: <Play size={16} />, onSelect: () => actions.practice({ topicId: topic.id }) },
-            { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(topic.id) },
-            { label: "New folder here", icon: <FolderPlus size={16} />, disabled: depth >= MAX_DEPTH, onSelect: () => actions.addFolder(topic.groupId) },
-            { label: "Delete", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeTopic(topic) },
-          ] : [])}>
+          {...dragProps({ kind: "topic", id: topic.id })} {...dropProps({ key, id: topic.id, parentId: topic.groupId, depth, exit })} {...menuProps(topic.name, items)}>
           {groups.length > 0 && <span className="size-control-sm flex-none" />}
           {actions?.editingId === topic.id ? editForm("topic", topic.id, topic.name, topic.groupId, (name, groupId) => actions.saveTopic(topic, name, groupId)) : <>
             <button type="button" className={rowTitle} disabled={!actions} onClick={() => actions?.openTopic(topic)} title={actions && "View topic summary and linked resources. Right-click for more."}>
               <BookOpen size={18} className="flex-none text-muted" /><span className="truncate">{topic.name}</span>
             </button>
+            {moreButton(topic.name, items)}
           </>}
         </div>
       </li>;
@@ -150,15 +158,17 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
     const key = `group:${group.id}`;
     const open = !collapsed.has(group.id);
     const FolderIcon = open ? FolderOpen : Folder;
+    const items: MenuItem[] = actions ? [
+      { label: "Practice", icon: <Play size={16} />, disabled: !topicCount, onSelect: () => actions.practice({ groupId: group.id }, "problems") },
+      { label: "Flashcards", icon: <Layers size={16} />, disabled: !topicCount, onSelect: () => actions.practice({ groupId: group.id }, "cards") },
+      { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(group.id) },
+      { label: "New topic inside", icon: <BookPlus size={16} />, onSelect: () => actions.addTopic(group.id) },
+      { label: "New folder inside", icon: <FolderPlus size={16} />, disabled: depth + 1 >= MAX_DEPTH, onSelect: () => actions.addFolder(group.id) },
+      { label: "Delete folder and contents", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeGroup(group) },
+    ] : [];
     return <li key={key}>
       <div className={cn(row, dropClass(key), highlightId === group.id && "animate-flash")} style={rowStyle(key, depth)}
-        {...dragProps({ kind: "group", id: group.id })} {...dropProps({ key, id: group.id, parentId: group.parentId, depth, folder: { open }, exit: open ? undefined : exit })} {...menuProps(group.name, actions ? [
-          { label: "Practice", icon: <Play size={16} />, disabled: !topicCount, onSelect: () => actions.practice({ groupId: group.id }) },
-          { label: "Edit", icon: <Pencil size={16} />, onSelect: () => actions.setEditingId(group.id) },
-          { label: "New topic inside", icon: <BookPlus size={16} />, onSelect: () => actions.addTopic(group.id) },
-          { label: "New folder inside", icon: <FolderPlus size={16} />, disabled: depth + 1 >= MAX_DEPTH, onSelect: () => actions.addFolder(group.id) },
-          { label: "Delete folder and contents", icon: <Trash2 size={16} />, danger: true, onSelect: () => actions.removeGroup(group) },
-        ] : [])}>
+        {...dragProps({ kind: "group", id: group.id })} {...dropProps({ key, id: group.id, parentId: group.parentId, depth, folder: { open }, exit: open ? undefined : exit })} {...menuProps(group.name, items)}>
         <IconButton size="sm" label={open ? `Collapse ${group.name}` : `Expand ${group.name}`} aria-expanded={open} onClick={() => onToggle(group.id)}>
           <ChevronRight size={18} className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-90")} />
         </IconButton>
@@ -167,6 +177,7 @@ export function TopicTree({ groups, topics, collapsed, onToggle, actions, highli
             <FolderIcon size={18} className="flex-none text-muted" /><span className="truncate">{group.name}</span>
             <span className="flex-none text-xs font-normal text-muted">{topicCount}</span>
           </button>
+          {moreButton(group.name, items)}
         </>}
       </div>
       {/* Animating grid rows from 0fr to 1fr collapses the folder to its content height without measuring it. */}

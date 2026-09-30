@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, Check, FileText, FolderPlus, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, positionAt, siblingPositions, treeFromPaths, type Placement } from "@/lib/topic-tree";
 import { api, AppShell, getAiRequestHeaders, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
-import { Badge, Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
+import { SavedChat } from "../../chat";
+import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
 import { TopicTree, type Group, type Topic, type TreeActions } from "./topic-tree";
 
 type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: Placement[] };
@@ -52,13 +53,16 @@ function SubjectContent() {
   const [uploadProgress, setUploadProgress] = useState("");
   const [suggestionQueue, setSuggestionQueue] = useState<{ resource: Resource; topics: Placement[] }[]>([]);
   const suggestions = suggestionQueue[0] ?? null;
+  const [findingTopicsIds, setFindingTopicsIds] = useState<string[]>([]);
+  // The resource whose request for new topics found none.
+  const [noNewTopicsId, setNoNewTopicsId] = useState<string | null>(null);
   const [resourceText, setResourceText] = useState<ResourceText | null>(null);
   const [resourceTextLoading, setResourceTextLoading] = useState(false);
-  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted">("summary");
+  const [resourceTab, setResourceTab] = useState<"summary" | "topics" | "extracted" | "chat">("summary");
   const [topicDetail, setTopicDetail] = useState<TopicDetail | null>(null);
-  const [topicTab, setTopicTab] = useState<"summary" | "resources">("summary");
+  const [topicTab, setTopicTab] = useState<"summary" | "resources" | "chat">("summary");
   const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
-  const [groupTab, setGroupTab] = useState<"summary" | "resources">("summary");
+  const [groupTab, setGroupTab] = useState<"summary" | "resources" | "chat">("summary");
   const [summarizingGroupIds, setSummarizingGroupIds] = useState<string[]>([]);
   const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
   const [summarizingTopicIds, setSummarizingTopicIds] = useState<string[]>([]);
@@ -96,6 +100,14 @@ function SubjectContent() {
       return next;
     });
   }
+  // Whether viewers show the chat beside the summary, and whether the subject chat is open; per-browser preferences.
+  const [chatOpen, toggleChat] = useStoredToggle("tao-viewer-chat", true);
+  const [subjectChatOpen, toggleSubjectChat] = useStoredToggle("tao-subject-chat", false);
+  const chatToggle = <ChatToggle open={chatOpen} onToggle={toggleChat} />;
+  // A viewer's chat has its own tab; wide screens can also show it beside the summary.
+  const wide = useMediaQuery("(min-width: 64rem)");
+  const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name}
+    className={beside ? splitChat : "mx-auto h-dvh min-h-80 w-full max-w-3xl"} />;
   function flash(itemId: string) {
     setHighlightId(itemId);
     setTimeout(() => setHighlightId((current) => current === itemId ? null : current), 1_200);
@@ -137,19 +149,30 @@ function SubjectContent() {
   const visibleGroups = tree.flatMap((node) => node.kind === "group" ? [node.group] : []);
   // Have one any-topic practice problem generated and waiting so Practice opens without a delay.
   // Topic and folder practice (from the tree's menu) prepare their next problem once started.
+  // Changing the diagram setting discards the waiting problem, so one is prepared again.
   const hasTopics = topics.length > 0;
+  const diagrams = Boolean(subject?.diagrams);
   useEffect(() => {
     if (!aiSettings.configured || !hasTopics) return;
     void fetch(`/api/subjects/${id}/problems/ready`, {
       method: "POST", headers: { ...getAiRequestHeaders(), "Content-Type": "application/json" }, body: "{}",
     }).catch(() => {});
-  }, [id, aiSettings.configured, hasTopics]);
+  }, [id, aiSettings.configured, hasTopics, diagrams]);
 
-  function startPractice(target: { topicId?: string; groupId?: string } = {}) {
-    if (!aiSettings.ready) return;
-    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
-    const query = target.topicId ? `?topic=${target.topicId}` : target.groupId ? `?group=${target.groupId}` : "";
-    router.push(`/study/${id}${query}`);
+  // Whether the AI may draw figures when it writes this subject's problems and cards. Shown figures are unaffected.
+  async function setDiagrams(on: boolean) {
+    try {
+      await api(`/api/subjects/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ diagrams: on }) });
+      setSubject((current) => current && { ...current, diagrams: on });
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save the diagram setting"); }
+  }
+
+  // Flashcards work without AI; problems need a signed-in provider. Without a mode, the study page opens the last one used.
+  function startPractice(target: { topicId?: string; groupId?: string } = {}, mode?: "problems" | "cards") {
+    if (mode !== "cards" && !aiSettings.ready) return;
+    if (mode === "problems" && !aiSettings.configured) { notifyAiSetupRequired(); return; }
+    const search = new URLSearchParams([...(mode ? [["mode", mode]] : []), ...(target.topicId ? [["topic", target.topicId]] : []), ...(target.groupId ? [["group", target.groupId]] : [])]);
+    router.push(`/study/${id}${search.size ? `?${search}` : ""}`);
   }
 
   async function addTopic(event: React.FormEvent) {
@@ -490,6 +513,25 @@ function SubjectContent() {
       .catch(() => setLinkSuggestions((current) => ({ ...current, [key]: "failed" })));
   }
 
+  // Asks the model again for topics a resource teaches and queues them for review, as after an upload.
+  async function suggestNewTopics(resourceId: string) {
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    const resource = resources.find((item) => item.id === resourceId);
+    if (!resource || findingTopicsIds.includes(resourceId)) return;
+    setFindingTopicsIds((current) => [...current, resourceId]);
+    setResourceTopicsError(""); setNoNewTopicsId(null);
+    try {
+      const result = await api<{ topics: Placement[] }>(`/api/resources/${resourceId}/new-topics`, { method: "POST", headers: getAiRequestHeaders() });
+      if (!result.topics.length) { setNoNewTopicsId(resourceId); return; }
+      setResourceText((current) => current?.id === resourceId ? null : current);
+      setSuggestionQueue((current) => [...current.filter((entry) => entry.resource.id !== resourceId), { resource, topics: result.topics }]);
+    } catch (e) {
+      setResourceTopicsError(e instanceof Error ? e.message : "Could not suggest topics");
+    } finally {
+      setFindingTopicsIds((current) => current.filter((item) => item !== resourceId));
+    }
+  }
+
   async function generateResourceSummary(resourceId: string) {
     if (!aiSettings.ready) return;
     if (!aiSettings.configured) {
@@ -546,12 +588,14 @@ function SubjectContent() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
       if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
+      // Another dialog, such as an enlarged figure, is open over the viewer.
+      if (document.querySelectorAll("[role='dialog']").length > 1) return;
       if (event.key === "Tab") {
         event.preventDefault();
         const step = event.shiftKey ? -1 : 1;
-        if (resourceText) setResourceTab((tab) => cycle(resourceTabs, tab, step));
-        else if (groupDetail) setGroupTab((tab) => cycle(topicTabs, tab, step));
-        else setTopicTab((tab) => cycle(topicTabs, tab, step));
+        if (resourceText) setResourceTab((tab) => cycle([...resourceTabs, "chat"], tab, step));
+        else if (groupDetail) setGroupTab((tab) => cycle([...topicTabs, "chat"], tab, step));
+        else setTopicTab((tab) => cycle([...topicTabs, "chat"], tab, step));
       } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
         const step = event.key === "ArrowRight" ? 1 : -1;
@@ -578,32 +622,50 @@ function SubjectContent() {
   const noText = <p className="text-muted">No selectable text was found in this file. Scanned PDFs need OCR, which is not available yet.</p>;
   const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
 
-  return <Page>
+  const subjectChat = subjectChatOpen && !loading && !!subject;
+  return <Page className={subjectChat ? "max-w-7xl" : undefined}>
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
-    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <>
-      <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
-        <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice the most due topic. Right-click a topic or folder to practice just that.">Practice</Button>
-      </div>
-      {error && <ErrorMessage>{error}</ErrorMessage>}
-
-      <section className="mb-12">
-        <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
-          <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
-            {topics.length > 1 && <Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready} title="Have the model propose folders for your topics"><Sparkles size={16} />Organize</Button>}
-            <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
-            <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
+    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
+      <div>
+        <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex h-control cursor-pointer items-center gap-2 text-sm" title="Ask the AI to draw a figure when one helps. It applies to problems and cards written from now on.">
+              <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => void setDiagrams(event.target.checked)} />
+              Generate diagrams
+            </label>
+            <ChatToggle open={subjectChatOpen} onToggle={toggleSubjectChat} />
+            <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
           </div>
         </div>
-        {tree.length > 0 && <TopicTree groups={groups} topics={topics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId} />}
-        {tree.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
-      </section>
+        {error && <ErrorMessage>{error}</ErrorMessage>}
+      </div>
 
-      <section>
-        <div className={sectionHead}><h2 className="text-xl font-semibold">Resources</h2><Button onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</Button></div>
-        <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple hidden onChange={e => void uploadFiles(e.currentTarget.files)} />
-        {resources.length > 0 && <List>{resources.map((resource) => <ListItem key={resource.id}><button type="button" className={rowTitle} onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text"><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button><IconButton label={`Remove ${resource.filename}`} tone="danger" onClick={() => removeResource(resource)}><Trash2 size={18} /></IconButton></ListItem>)}</List>}
-      </section>
-    </>}
+      {/* In place of topics and resources on narrow screens; beside them, and in view while the page scrolls, on wide ones. */}
+      {subjectChat && <div className="self-start max-lg:w-full lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} className="max-lg:h-[calc(100dvh-18rem)] lg:h-[min(40rem,calc(100dvh-14rem))]"
+          empty="Ask about your progress, weakest topics, or what to study next, or about the course material." />
+      </div>}
+
+      <div className={cn(subjectChat && "max-lg:hidden")}>
+        <section className="mb-12">
+          <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
+            <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
+              {topics.length > 1 && <Button variant="ghost" onClick={() => void proposeOrganization()} disabled={organizing !== null || !aiSettings.ready} title="Have the model propose folders for your topics"><Sparkles size={16} />Organize</Button>}
+              <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
+              <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
+            </div>
+          </div>
+          {tree.length > 0 && <TopicTree groups={groups} topics={topics} collapsed={collapsed} onToggle={(groupId) => toggleFolder(groupId)} actions={treeActions} highlightId={highlightId} />}
+          {tree.length === 0 && <p className="text-muted">Add a topic to start practicing.</p>}
+        </section>
+
+        <section>
+          <div className={sectionHead}><h2 className="text-xl font-semibold">Resources</h2><Button onClick={() => fileRef.current?.click()} disabled={busy}><Plus size={18} />{uploadProgress || "Add"}</Button></div>
+          <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple hidden onChange={e => void uploadFiles(e.currentTarget.files)} />
+          {resources.length > 0 && <List>{resources.map((resource) => <ListItem key={resource.id}><button type="button" className={rowTitle} onClick={() => void showResourceText(resource)} disabled={resourceTextLoading} title="View extracted text"><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button><IconButton label={`Remove ${resource.filename}`} tone="danger" onClick={() => removeResource(resource)}><Trash2 size={18} /></IconButton></ListItem>)}</List>}
+        </section>
+      </div>
+    </div>}
 
     {suggestions && <Modal title="Suggested topics" subtitle={suggestions.resource.filename} onClose={closeSuggestions}>
       <List>{suggestions.topics.map((suggestion) => {
@@ -622,8 +684,9 @@ function SubjectContent() {
     </Modal>}
 
     {resourceText && <Modal wide title={resourceText.filename} label={`Summary and extracted text from ${resourceText.filename}`} onClose={() => setResourceText(null)}>
-      <Tabs label="Resource content" value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }]} />
-      {resourceTab === "summary" ? <section role="tabpanel" aria-label="Model summary">
+      <Tabs label="Resource content" actions={wide && resourceTab === "summary" && chatToggle} value={resourceTab} onChange={setResourceTab} tabs={[{ id: "summary", label: "Summary" }, { id: "topics", label: "Topics", count: resourceText.topics.length }, { id: "extracted", label: "Extracted text", count: resourceText.extractedText.length }, { id: "chat", label: "Chat" }]} />
+      {resourceTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename)}</section>
+      : resourceTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/resources/${resourceText.id}/chat`, resourceText.id, resourceText.filename, true)}><section role="tabpanel" aria-label="Model summary">
         {summaryError && <ErrorMessage>{summaryError}</ErrorMessage>}
         {summaryLoading || resourceText.summaryStatus === "pending" ? pending("Summarizing this resource…", !summaryLoading && <Button size="sm" onClick={() => void generateResourceSummary(resourceText.id)}>Retry if stalled</Button>) : resourceText.summaryStatus === "complete" && resourceText.modelSummary ? <>
           <MarkdownMathText text={resourceText.modelSummary} />
@@ -631,20 +694,24 @@ function SubjectContent() {
           <p className="text-muted">{resourceText.summaryStatus === "not_generated" ? "A model summary captures the key definitions, results, methods, and examples in this resource." : "The model could not summarize this resource."}</p>
           {resourceText.extractedText ? <Button variant="primary" onClick={() => void generateResourceSummary(resourceText.id)} disabled={summaryLoading}>{summaryLoading ? "Summarizing…" : resourceText.summaryStatus === "failed" ? "Try again" : "Create summary"}</Button> : noText}
         </div>}
-      </section> : resourceTab === "topics" ? <section role="tabpanel" aria-label="Topics linked to resource">
+      </section></WithChat> : resourceTab === "topics" ? <section role="tabpanel" aria-label="Topics linked to resource">
         {resourceTopicsError && <ErrorMessage>{resourceTopicsError}</ErrorMessage>}
+        {noNewTopicsId === resourceText.id && <p className="mb-4 text-sm text-muted" role="status">The model found no topics in this file beyond those already linked.</p>}
         <LinkPicker noun="topic" target="resource" icon={BookOpen} items={topics} saved={resourceText.topics.map((topic) => topic.id)}
           selected={selectedResourceTopics} onSelectedChange={setSelectedResourceTopics} search={topicSearch} onSearchChange={setTopicSearch}
           suggestions={linkSuggestions[`resource:${resourceText.id}`]} onSuggest={() => loadLinkSuggestions(`resource:${resourceText.id}`, `/api/resources/${resourceText.id}/suggested-topics`)}
+          extraAction={resourceText.extractedText && <Button disabled={findingTopicsIds.includes(resourceText.id)} onClick={() => void suggestNewTopics(resourceText.id)} title="Ask the model for topics this file teaches that aren't linked to it yet">
+            {findingTopicsIds.includes(resourceText.id) ? <><Spinner />Finding…</> : <><BookPlus size={16} />New topics</>}</Button>}
           saving={savingResourceIds.includes(resourceText.id)} onSave={() => void saveResourceTopics()} />
       </section> : <section role="tabpanel" aria-label="Extracted text">{resourceText.extractedText ? <pre className="rounded-md bg-subtle p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{resourceText.extractedText}</pre> : noText}</section>}
     </Modal>}
 
     {groupDetail && <Modal wide title={groupDetail.name} label={`Folder summary for ${groupDetail.name}`} onClose={() => setGroupDetail(null)}
       subtitle={[...groupPath(groups, groupDetail.parentId), `${groupDetail.topicCount} topic${groupDetail.topicCount === 1 ? "" : "s"}`].join(" › ")}>
-      <Tabs label="Folder content" value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }]} />
+      <Tabs label="Folder content" actions={wide && groupTab === "summary" && chatToggle} value={groupTab} onChange={setGroupTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: groupDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {groupErrors[groupDetail.id] && <ErrorMessage>{groupErrors[groupDetail.id]}</ErrorMessage>}
-      {groupTab === "summary" ? <section role="tabpanel" aria-label="Folder summary">
+      {groupTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name)}</section>
+      : groupTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/groups/${groupDetail.id}/chat`, groupDetail.id, groupDetail.name, true)}><section role="tabpanel" aria-label="Folder summary">
         {summarizingGroupIds.includes(groupDetail.id) ? pending("Summarizing this folder…") : groupDetail.summary ? <>
           {groupDetail.summaryStatus === "stale" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">This folder&apos;s contents changed. Refresh the summary to reflect them.</p>}
           <MarkdownMathText text={groupDetail.summary} />
@@ -653,7 +720,7 @@ function SubjectContent() {
           <p className="text-muted">{groupDetail.topicCount ? "A short overview of the topics and folders inside." : "Add topics to this folder to summarize it."}</p>
           {groupDetail.topicCount > 0 && <Button variant="primary" onClick={() => void generateGroupSummary(groupDetail.id)}>Create summary</Button>}
         </div>}
-      </section> : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
+      </section></WithChat> : <section role="tabpanel" aria-label="Resources linked to topics in this folder">
         {groupDetail.resources.length ? <List>{groupDetail.resources.map((resource) => <ListItem key={resource.id}>
           <button type="button" className={rowTitle} onClick={() => { const item = resources.find((candidate) => candidate.id === resource.id); if (item) void showResourceText(item); }}><FileText size={18} className="flex-none text-muted" /><span className="truncate">{resource.filename}</span></button>
         </ListItem>)}</List> : <p className="text-muted">No resources are linked to topics in this folder.</p>}
@@ -676,15 +743,16 @@ function SubjectContent() {
     </Modal>}
 
     {topicDetail && <Modal wide title={topicDetail.name} label={`Topic summary for ${topicDetail.name}`} onClose={() => setTopicDetail(null)} subtitle={topicDetail.groupId ? groupPath(groups, topicDetail.groupId).join(" › ") : undefined}>
-      <Tabs label="Topic content" value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }]} />
+      <Tabs label="Topic content" actions={wide && topicTab === "summary" && chatToggle} value={topicTab} onChange={setTopicTab} tabs={[{ id: "summary", label: "Summary" }, { id: "resources", label: "Resources", count: topicDetail.resources.length }, { id: "chat", label: "Chat" }]} />
       {topicSummaryErrors[topicDetail.id] && <ErrorMessage>{topicSummaryErrors[topicDetail.id]}</ErrorMessage>}
-      {topicTab === "summary" ? <section role="tabpanel" aria-label="Topic coverage summary">
+      {topicTab === "chat" ? <section role="tabpanel" aria-label="Chat" className="flex min-h-0 flex-col">{viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name)}</section>
+      : topicTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name, true)}><section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…") : topicDetail.coverageSummary ? <>
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
           {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
         </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
-      </section> : <section role="tabpanel" aria-label="Resources linked to topic">
+      </section></WithChat> : <section role="tabpanel" aria-label="Resources linked to topic">
         <LinkPicker noun="resource" target="topic" icon={FileText} items={resources.map((resource) => ({ id: resource.id, name: resource.filename }))} saved={topicDetail.resources.map((resource) => resource.id)}
           selected={selectedTopicResources} onSelectedChange={setSelectedTopicResources} search={resourceSearch} onSearchChange={setResourceSearch}
           suggestions={linkSuggestions[`topic:${topicDetail.id}`]} onSuggest={() => loadLinkSuggestions(`topic:${topicDetail.id}`, `/api/topics/${topicDetail.id}/suggested-resources`)}
@@ -697,6 +765,45 @@ function SubjectContent() {
 
 const resourceTabs = ["summary", "topics", "extracted"] as const;
 const topicTabs = ["summary", "resources"] as const;
+
+// A viewer's summary with its chat, when open, beside it on wide screens and below it on narrow ones. The chat stays in view
+// while the summary scrolls the modal.
+function WithChat({ open, chat, children }: { open: boolean; chat: ReactNode; children: ReactNode }) {
+  if (!open) return children;
+  return <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:items-start">
+    <div className="min-w-0">{children}</div>
+    <div className="lg:sticky lg:top-0">{chat}</div>
+  </div>;
+}
+
+// A boolean kept in localStorage under `key`, starting from `initial` when nothing is stored.
+function useStoredToggle(key: string, initial: boolean) {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    try { const stored = localStorage.getItem(key); if (stored) setValue(stored === "true"); } catch { /* Use the default. */ }
+  }, [key]);
+  const toggle = () => setValue((current) => {
+    try { localStorage.setItem(key, String(!current)); } catch { /* Keep it for this visit only. */ }
+    return !current;
+  });
+  return [value, toggle] as const;
+}
+
+// Whether `query` matches, following changes; true before hydration so the server renders the wide layout.
+function useMediaQuery(query: string) {
+  return useSyncExternalStore((onChange) => {
+    const media = window.matchMedia(query);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, () => window.matchMedia(query).matches, () => true);
+}
+
+function ChatToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return <IconButton label={open ? "Hide chat" : "Show chat"} aria-pressed={open} className="aria-pressed:text-accent" onClick={onToggle}><MessageSquare size={18} /></IconButton>;
+}
+
+// Tall enough to fill the modal below its title and tabs.
+const splitChat = "lg:h-[calc(100dvh-14rem)]";
 
 // Returns the item `step` places from `current`, wrapping around; `current` itself if it is not in the list.
 function cycle<T>(items: readonly T[], current: T, step: number) {
@@ -733,13 +840,15 @@ type LinkPickerProps = {
   onSearchChange: (search: string) => void;
   suggestions?: LinkSuggestions;
   onSuggest: () => void;
+  // Shown before Suggest, such as a way to create items instead of linking existing ones.
+  extraAction?: ReactNode;
   saving: boolean;
   savingLabel?: string;
   onSave: () => void;
 };
 
 // Stages link changes between a topic and resources (or the reverse) until Save.
-function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, suggestions, onSuggest, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
+function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelectedChange, search, onSearchChange, suggestions, onSuggest, extraAction, saving, savingLabel = "Saving…", onSave }: LinkPickerProps) {
   const query = search.trim().toLocaleLowerCase();
   const chosen = items.filter((item) => selected.includes(item.id));
   const suggested = Array.isArray(suggestions) ? suggestions : [];
@@ -753,6 +862,7 @@ function LinkPicker({ noun, target, icon: Icon, items, saved, selected, onSelect
     <div className={`${sectionHead} flex-wrap`}><h3 className="text-lg font-semibold">Add {noun}s</h3><div className="flex flex-wrap items-center justify-end gap-2">
       {Array.isArray(suggestions) && !suggestions.some((id) => !selected.includes(id)) && <span className="text-sm text-muted max-sm:hidden">No clear matches</span>}
       {suggestions === "failed" && <span className="text-sm text-danger max-sm:hidden">Suggestions failed</span>}
+      {extraAction}
       <Button disabled={suggestions === "loading" || items.length === selected.length} onClick={onSuggest} title={`Ask the model which ${noun}s cover the same material`}>{suggestions === "loading" ? <Spinner /> : <Sparkles size={16} />}{suggestions === "loading" ? "Suggesting…" : "Suggest"}</Button>
       <Input className="w-64 max-sm:w-40" type="search" aria-label={`Search available ${noun}s`} placeholder={`Search ${noun}s`} value={search} onChange={(event) => onSearchChange(event.target.value)} /></div></div>
     {available.length ? <List>{available.map((item) => <ListItem key={item.id} className="py-0"><button type="button" className={choiceRow} aria-label={`Add ${item.name} to this ${target}`} onClick={() => onSelectedChange([...selected, item.id])}><Icon size={18} className="flex-none text-muted" /><span className="min-w-0 flex-1 truncate">{item.name}</span>{suggested.includes(item.id) && <Badge><Sparkles size={12} />Suggested</Badge>}{saved.includes(item.id) && <Badge tone="danger">To remove</Badge>}<Plus size={18} className="flex-none text-muted" /></button></ListItem>)}</List> : <p className="text-sm text-muted">{items.length === 0 ? `No ${noun}s yet.` : search ? `No matching ${noun}s.` : `All ${noun}s selected.`}</p>}

@@ -1,7 +1,7 @@
 // Models sometimes JSON-escape their text twice, so a string arrives holding
 // `\\in` and a literal `\n` instead of `\in` and a line break. Unescape once
-// when TeX commands appear only in doubled form.
-const doubledCommand = /\\\\[a-zA-Z]/;
+// when TeX commands or math delimiters such as `\\(` appear only in doubled form.
+const doubledCommand = /\\\\[a-zA-Z()[\]]/;
 const singleCommand = /(?<!\\)\\(?![nt\\"])[a-zA-Z({[]/;
 
 export function undoDoubleEscaping(text: string) {

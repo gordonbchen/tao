@@ -23,3 +23,7 @@ test("keeps real line breaks when unescaping", () => {
 test("unescapes nested reply fields", () => {
   assert.deepEqual(undoDoubleEscapingDeep({ hints: [String.raw`Use \\sup`], n: 3 }), { hints: [String.raw`Use \sup`], n: 3 });
 });
+
+test("unescapes doubled math delimiters that hold no TeX command", () => {
+  assert.equal(undoDoubleEscaping(String.raw`If \\(f(a)=2\\) and \\(5\\) lies on \\([a,b]\\)`), String.raw`If \(f(a)=2\) and \(5\) lies on \([a,b]\)`);
+});

@@ -3,6 +3,7 @@
 // Shared UI primitives. Pages compose these and add only layout utilities.
 // Follow the UI style guide in AGENTS.md before adding a variant or a new primitive.
 import { useEffect, useRef, type ComponentProps, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 
@@ -52,8 +53,9 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
 
 const badgeTones = { accent: "bg-accent-soft text-accent", neutral: "bg-subtle text-muted", danger: "bg-danger-soft text-danger" };
 
-export function Badge({ tone = "accent", className, ...props }: ComponentProps<"span"> & { tone?: keyof typeof badgeTones }) {
-  return <span className={cn("inline-flex flex-none items-center gap-1 rounded-full px-2 py-1 text-xs", badgeTones[tone], className)} {...props} />;
+// Never wider than its container: long text, such as a topic name, is truncated.
+export function Badge({ tone = "accent", className, children, ...props }: ComponentProps<"span"> & { tone?: keyof typeof badgeTones }) {
+  return <span className={cn("inline-flex max-w-full min-w-0 flex-none items-center gap-1 rounded-full px-2 py-1 text-xs", badgeTones[tone], className)} {...props}><span className="truncate">{children}</span></span>;
 }
 
 export function Spinner({ className }: { className?: string }) {
@@ -75,26 +77,34 @@ export function Page({ className, ...props }: ComponentProps<"main">) {
 type ModalProps = { title: ReactNode; label?: string; subtitle?: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode };
 
 // Dialog with a backdrop, title row, and close button. Escape and backdrop clicks close it.
+// Open modals, innermost last: Escape closes only the top one, such as an enlarged figure over a viewer.
+const openModals: object[] = [];
+
 export function Modal({ title, label, subtitle, onClose, wide, children }: ModalProps) {
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; });
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close.current(); };
+    const token = {};
+    openModals.push(token);
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && openModals.at(-1) === token) close.current(); };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => { window.removeEventListener("keydown", onKeyDown); openModals.splice(openModals.indexOf(token), 1); };
   }, []);
-  return <div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+  // Rendered into <body> so no ancestor's stacking context (a sticky chat, a card) can draw over it.
+  // Wide dialogs fill a narrow screen instead of floating in it. They are flex columns, so a panel that may shrink
+  // (min-h-0) can fill exactly the height left under the title and tabs, like a viewer's chat.
+  return createPortal(<div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden max-sm:p-0" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div role="dialog" aria-modal="true" aria-label={label ?? (typeof title === "string" ? title : undefined)} className={cn(
       "w-full overflow-auto rounded-lg border border-line bg-paper p-6 shadow-float max-sm:p-4",
-      wide ? "max-h-[calc(100dvh-40px)] max-w-7xl" : "max-h-[90vh] max-w-lg",
+      wide ? "flex max-h-[calc(100dvh-48px)] max-w-7xl flex-col max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none max-sm:border-0" : "max-h-[90vh] max-w-lg",
     )}>
       <div className="mb-6 flex items-center justify-between gap-4">
-        <div className="min-w-0"><h2 className="text-xl font-semibold">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
+        <div className="min-w-0"><h2 className="text-xl font-semibold break-words">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
         <IconButton label="Close" onClick={onClose}><X size={20} /></IconButton>
       </div>
       {children}
     </div>
-  </div>;
+  </div>, document.body);
 }
 
 export type MenuItem = { label: string; icon?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void };
@@ -148,14 +158,15 @@ export function ContextMenu({ x, y, label, items, onClose }: { x: number; y: num
 type Tab<T extends string> = { id: T; label: string; count?: number };
 
 // Underlined tab list. Pages that use it own its keyboard shortcuts.
-export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string }) {
-  return <div role="tablist" aria-label={label} className="-mt-2 mb-4 flex gap-6 border-b border-line">
+// `actions` sit at the right end of the tab row.
+export function Tabs<T extends string>({ tabs, value, onChange, label, actions, className }: { tabs: Tab<T>[]; value: T; onChange: (id: T) => void; label: string; actions?: ReactNode; className?: string }) {
+  return <div className={cn("-mt-2 mb-4 flex items-center gap-6 border-b border-line max-sm:gap-4", className)}><div role="tablist" aria-label={label} className="flex min-w-0 gap-6 max-sm:gap-4">
     {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={value === tab.id} tabIndex={value === tab.id ? 0 : -1}
       onClick={() => onChange(tab.id)}
-      className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
-      {tab.label}{tab.count !== undefined && <span className="text-xs text-muted">{tab.count.toLocaleString()}</span>}
+      className={cn("-mb-px inline-flex h-control items-center gap-2 border-b-2 whitespace-nowrap px-1 text-sm transition-colors", value === tab.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink")}>
+      {tab.label}{tab.count !== undefined && <span className="text-xs text-muted max-sm:hidden">{tab.count.toLocaleString()}</span>}
     </button>)}
-  </div>;
+  </div>{actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}</div>;
 }
 
 // Bordered row list used for subjects, topics, resources, and dialog choices.
