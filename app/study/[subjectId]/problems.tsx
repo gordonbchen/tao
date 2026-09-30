@@ -209,7 +209,7 @@ function BrowseDialog({ subjectId, selection, onOpen, onClose }: { subjectId: st
   const needle = search.trim().toLocaleLowerCase();
   const shown = (problems ?? []).filter((problem) => !needle || `${problem.prompt}\n${problem.topicName ?? ""}`.toLocaleLowerCase().includes(needle));
 
-  return <Modal title="Problems" subtitle={problems ? `${problems.length.toLocaleString()} in this selection` : undefined} onClose={onClose} wide>
+  return <Modal title="Problems" subtitle={problems ? `${problems.length.toLocaleString()} in this selection` : "Loading…"} onClose={onClose} wide>
     <Input className="mb-4 w-full" aria-label="Search problems" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" autoFocus />
     {error && <ErrorMessage>{error}</ErrorMessage>}
     {!problems ? <p className="inline-flex items-center gap-3 text-muted"><Spinner />Loading problems…</p> : <ul className="border-t border-line">

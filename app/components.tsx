@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { KeyRound, Menu, Moon, Sun, X } from "lucide-react";
+import { loadMathJax } from "./math-text";
 import { Button, ErrorMessage, IconButton, Input, List, ListItem, Modal, Select, Spinner } from "./ui";
 
 // Unsent text (a chat message or a problem answer) kept in this browser as it is typed, so closing the page
@@ -113,9 +114,12 @@ function UndoToast() {
   </div>;
 }
 
+const noStatus: AIStatus = { available: false, providers: [], models: [], defaultModel: "" };
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState("light");
-  const [status, setStatus] = useState<AIStatus>({ available: false, providers: [], models: [], defaultModel: "" });
+  // Null until the first status check, so the header does not show Connect AI and then swap it for the model picker.
+  const [status, setStatus] = useState<AIStatus | null>(null);
   const [model, setModelState] = useState("gpt-6-luna");
   const [usage, setUsage] = useState<AIUsage>(emptyUsage);
   const [accountsOpen, setAccountsOpen] = useState(false);
@@ -133,6 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.dispatchEvent(new Event("tao:ai-model-changed"));
       return data;
     } catch {
+      setStatus(noStatus);
       updateAISettings({ configured: false, ready: true });
     }
   }, []);
@@ -143,8 +148,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         updateAISettings({ usage: result });
       }).catch(() => undefined);
     };
-    const saved = localStorage.getItem("tao-theme");
-    if (saved === "dark") { setTheme("dark"); document.documentElement.dataset.theme = "dark"; }
+    // Load MathJax now so math is ready to typeset before it is first shown.
+    loadMathJax().catch(() => undefined);
+    // The layout's script already applied the stored theme; match the toggle to it.
+    if (document.documentElement.dataset.theme === "dark") setTheme("dark");
     void loadStatus();
     const onSetupRequired = () => setAccountsOpen(true);
     window.addEventListener("tao:ai-setup-required", onSetupRequired);
@@ -153,7 +160,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => { window.removeEventListener("tao:ai-setup-required", onSetupRequired); window.removeEventListener("tao:ai-model-changed", refreshUsage); window.clearInterval(usageTimer); };
   }, [loadStatus]);
   function setModel(next: string) { updateModel(next); setModelState(next); window.dispatchEvent(new Event("tao:ai-model-changed")); }
-  const provider = status.models.find(option => option.id === model)?.provider ?? "AI";
+  const provider = status?.models.find(option => option.id === model)?.provider ?? "AI";
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -161,11 +168,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     localStorage.setItem("tao-theme", next);
   }
   const usageLabel = usage.remainingPercent === null ? `${provider} allowance is unavailable` : `${usage.remainingPercent}% remains in the most used allowance window${usage.windowDurationMins ? ` (${usage.windowDurationMins} minutes)` : ""}${usage.lifetimeTokens === null ? "" : ` · ${usage.lifetimeTokens.toLocaleString()} lifetime tokens`}`;
-  const modelSelect = (className: string) => <Select className={className} aria-label="AI model" title={`Select ${provider} model`} value={model} onChange={e => setModel(e.target.value)}>{status.models.map(option => <option key={option.id} value={option.id}>{option.provider} · {option.id}</option>)}</Select>;
+  const modelSelect = (className: string) => <Select className={className} aria-label="AI model" title={`Select ${provider} model`} value={model} onChange={e => setModel(e.target.value)}>{status?.models.map(option => <option key={option.id} value={option.id}>{option.provider} · {option.id}</option>)}</Select>;
   const usageBar = <div className="flex min-w-0 items-center gap-2 text-xs text-muted" title={usageLabel} aria-label={usage.remainingPercent === null ? `${provider} usage unavailable` : `${usage.remainingPercent}% usage remaining`}>
     <span className="max-md:hidden max-sm:inline">Usage remaining</span>
     <div className="h-2 w-20 min-w-8 flex-shrink overflow-hidden rounded-full bg-line-strong max-sm:flex-1"><div className="h-full bg-accent" style={{ width: `${usage.remainingPercent ?? 0}%` }} /></div>
-    <strong className="font-semibold text-ink">{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
+    {/* Wide enough for 100%, so the bar does not move when usage arrives. */}
+    <strong className="w-10 flex-none text-right font-semibold text-ink">{usage.remainingPercent === null ? "—" : `${usage.remainingPercent}%`}</strong>
   </div>;
   const themeLabel = theme === "dark" ? "Use light mode" : "Use dark mode";
   const ThemeIcon = theme === "dark" ? Sun : Moon;
@@ -173,24 +181,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <header className="border-b border-line bg-paper"><div className="flex h-16 w-full items-center justify-between gap-4 px-6 max-sm:px-4">
       <Link className="inline-flex flex-none items-center gap-2 text-lg font-semibold" href="/"><Image className="dark:invert" src="/icon.svg" alt="" width={30} height={30} />Tao</Link>
       <nav className="flex min-w-0 items-center gap-2 max-sm:hidden" aria-label="Site controls">
-        {status.available ? <>
+        {status?.available ? <>
           {modelSelect("min-w-0 max-w-64")}
           <div className="px-2">{usageBar}</div>
           <IconButton label="AI accounts" onClick={() => setAccountsOpen(true)}><KeyRound size={20} /></IconButton>
-        </> : <Button onClick={() => setAccountsOpen(true)}><KeyRound size={18} />Connect AI</Button>}
+        </> : status && <Button onClick={() => setAccountsOpen(true)}><KeyRound size={18} />Connect AI</Button>}
         <IconButton label={themeLabel} onClick={toggleTheme}><ThemeIcon size={20} /></IconButton>
       </nav>
       <IconButton className="sm:hidden" label={menuOpen ? "Close menu" : "Menu"} aria-expanded={menuOpen} aria-controls="site-menu" onClick={() => setMenuOpen(open => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</IconButton>
     </div>
     {menuOpen && <nav id="site-menu" className="flex flex-col gap-3 border-t border-line px-4 py-4 sm:hidden" aria-label="Site controls">
-      {status.available && <>{modelSelect("w-full")}{usageBar}</>}
+      {status?.available && <>{modelSelect("w-full")}{usageBar}</>}
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => { setMenuOpen(false); setAccountsOpen(true); }}><KeyRound size={18} />{status.available ? "AI accounts" : "Connect AI"}</Button>
+        <Button onClick={() => { setMenuOpen(false); setAccountsOpen(true); }}><KeyRound size={18} />{status?.available ? "AI accounts" : "Connect AI"}</Button>
         <Button onClick={toggleTheme}><ThemeIcon size={18} />{themeLabel}</Button>
       </div>
     </nav>}
     </header>
-    {children}{accountsOpen && <AIAccounts providers={status.providers} refresh={loadStatus} close={() => setAccountsOpen(false)} />}<UndoToast />
+    {children}{accountsOpen && <AIAccounts providers={status?.providers ?? []} refresh={loadStatus} close={() => setAccountsOpen(false)} />}<UndoToast />
   </div>;
 }
 

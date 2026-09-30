@@ -192,6 +192,8 @@ function ChatName({ name, fallback, rename }: { name: string; fallback: string; 
   </div>;
 }
 
+const savedChatHeight = "h-[min(36rem,calc(100dvh-240px))]";
+
 // A saved chat about a subject, topic, folder, or resource: `path` is its chat endpoint. Remount it with a new `key` for each item.
 export function SavedChat({ path, name, empty = "Ask a question, request an example, or ask to be quizzed. Answers draw on your course material.", className }: { path: string; name: string; empty?: string; className?: string }) {
   const ai = useAISettings();
@@ -214,8 +216,9 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
   }
 
   if (error) return <ErrorMessage>{error}</ErrorMessage>;
-  if (!chat) return <p className="flex items-center gap-2 text-sm text-muted"><Spinner />Loading the chat…</p>;
-  return <Chat className={cn("h-[min(36rem,calc(100dvh-240px))]", className)} initialMessages={chat.messages} initialName={chat.name} draftKey={`chat:${path}`} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
+  // The placeholder takes the chat's size, so nothing moves when the messages arrive.
+  if (!chat) return <Card className={cn("flex min-h-80 items-center justify-center gap-2 text-sm text-muted", savedChatHeight, className)}><Spinner />Loading the chat…</Card>;
+  return <Chat className={cn(savedChatHeight, className)} initialMessages={chat.messages} initialName={chat.name} draftKey={`chat:${path}`} send={send} summarize={summarize} clear={() => api<void>(path, { method: "DELETE" })}
     history={async () => (await api<{ chats: PastChat[] }>(`${path}?archived=1`)).chats}
     resume={(clearedAt) => api<void>(`${path}?restore=${encodeURIComponent(clearedAt)}`, { method: "DELETE" })}
     rename={async (name) => { await api(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }}

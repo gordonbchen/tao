@@ -362,7 +362,7 @@ function BrowseDialog({ subjectId, query, onEdit, onClose }: { subjectId: string
   const needle = search.trim().toLocaleLowerCase();
   const shown = (cards ?? []).filter((card) => !needle || `${card.front}\n${card.back}\n${card.topicName ?? ""}`.toLocaleLowerCase().includes(needle));
 
-  return <Modal title="Cards" subtitle={cards ? `${cards.length.toLocaleString()} in this selection` : undefined} onClose={onClose} wide>
+  return <Modal title="Cards" subtitle={cards ? `${cards.length.toLocaleString()} in this selection` : "Loading…"} onClose={onClose} wide>
     <Input className="mb-4 w-full" aria-label="Search cards" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" autoFocus />
     {error && <ErrorMessage>{error}</ErrorMessage>}
     {!cards ? <p className="inline-flex items-center gap-3 text-muted"><Spinner />Loading cards…</p> : <ul className="border-t border-line">

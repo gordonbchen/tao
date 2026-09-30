@@ -104,6 +104,7 @@ function SubjectContent() {
   const [chatOpen, toggleChat] = useStoredToggle("tao-viewer-chat", true);
   const [subjectChatOpen, toggleSubjectChat] = useStoredToggle("tao-subject-chat", false);
   const chatToggle = <ChatToggle open={chatOpen} onToggle={toggleChat} />;
+  useEffect(() => { document.documentElement.dataset.subjectChat = String(subjectChatOpen); }, [subjectChatOpen]);
   // A viewer's chat has its own tab; wide screens can also show it beside the summary.
   const wide = useMediaQuery("(min-width: 64rem)");
   const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name}
@@ -623,7 +624,9 @@ function SubjectContent() {
   const closeSuggestions = () => setSuggestionQueue((current) => current.slice(1));
 
   const subjectChat = subjectChatOpen && !loading && !!subject;
-  return <Page className={subjectChat ? "max-w-7xl" : undefined}>
+  // Wide from the first paint when the chat will be open (the layout's script sets the attribute), so the page does not
+  // widen once it hydrates or the subject loads.
+  return <Page className="in-data-[subject-chat=true]:max-w-7xl">
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid grid-cols-[minmax(0,1fr)] gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
       <div>
@@ -776,16 +779,23 @@ function WithChat({ open, chat, children }: { open: boolean; chat: ReactNode; ch
   </div>;
 }
 
-// A boolean kept in localStorage under `key`, starting from `initial` when nothing is stored.
+// A boolean kept in localStorage under `key`, `initial` when nothing is stored. It is read during hydration rather than
+// in an effect, so the page is laid out with it before the first paint. Toggling without storage lasts for this visit.
+const toggleEvent = "tao:stored-toggle";
+const unstored = new Map<string, boolean>();
 function useStoredToggle(key: string, initial: boolean) {
-  const [value, setValue] = useState(initial);
-  useEffect(() => {
-    try { const stored = localStorage.getItem(key); if (stored) setValue(stored === "true"); } catch { /* Use the default. */ }
-  }, [key]);
-  const toggle = () => setValue((current) => {
-    try { localStorage.setItem(key, String(!current)); } catch { /* Keep it for this visit only. */ }
-    return !current;
-  });
+  const read = () => {
+    if (unstored.has(key)) return unstored.get(key)!;
+    try { const stored = localStorage.getItem(key); return stored ? stored === "true" : initial; } catch { return initial; }
+  };
+  const value = useSyncExternalStore((onChange) => {
+    window.addEventListener(toggleEvent, onChange);
+    return () => window.removeEventListener(toggleEvent, onChange);
+  }, read, () => initial);
+  const toggle = () => {
+    try { localStorage.setItem(key, String(!value)); } catch { unstored.set(key, !value); }
+    window.dispatchEvent(new Event(toggleEvent));
+  };
   return [value, toggle] as const;
 }
 

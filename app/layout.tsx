@@ -11,7 +11,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    // Before the first paint, the script applies the stored theme and marks whether the subject chat is open, so the
+    // subject page is laid out at its final width. It changes <html>, so hydration warnings are suppressed there.
+    <html lang="en" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: `try{const d=document.documentElement.dataset;if(localStorage.getItem("tao-theme")==="dark")d.theme="dark";d.subjectChat=localStorage.getItem("tao-subject-chat")==="true"}catch{}` }} /></head>
       <body>{children}</body>
     </html>
   );
