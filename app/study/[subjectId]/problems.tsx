@@ -58,6 +58,8 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   const [browsing, setBrowsing] = useState(false);
   const [settings, setSettings] = useState(readSettings);
   const [choosingSettings, setChoosingSettings] = useState(false);
+  // The student's own request for new problems, kept until they change it.
+  const [instructions, setInstructions] = useState("");
   // Counts problem loads so a slow generation cannot replace a problem opened from Browse meanwhile.
   const loadCount = useRef(0);
   // Stops the problem being made or the answer being checked.
@@ -98,13 +100,13 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     setProblem(null); setWorking(true); setGenerating(true); setError("");
     try {
       const result = await aiApi<{ problem: Problem }>(`/api/subjects/${subjectId}/problems`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...selection, ...settings, ...(skipReuse ? { skipReuse: true } : {}) }), signal: controller.signal });
+        body: JSON.stringify({ ...selection, ...settings, instructions: instructions.trim(), ...(skipReuse ? { skipReuse: true } : {}) }), signal: controller.signal });
       if (load === loadCount.current) show(result.problem, null);
     } catch (e) {
       if (load === loadCount.current && !isAbort(e)) setError(e instanceof Error ? e.message : "Could not create a problem");
     }
     finally { if (load === loadCount.current) { setWorking(false); setGenerating(false); stopper.current = null; } }
-  }, [ai.configured, subjectId, selection, settings, show]);
+  }, [ai.configured, subjectId, selection, settings, instructions, show]);
 
   // Opens a past problem with its chat and latest attempt, replacing any problem still being generated.
   async function open(id: string) {
@@ -182,6 +184,8 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     <Field label="Answer"><Select value={settings.answerDepth} onChange={(event) => saveSettings({ ...settings, answerDepth: event.target.value as Settings["answerDepth"] })}>
       {Object.entries(answerDepths).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
     </Select></Field>
+    <Field label="Instructions (optional)"><Textarea rows={2} value={instructions} maxLength={1000} onChange={(event) => setInstructions(event.target.value)}
+      placeholder="For example: a computation with specific numbers, or a proof about compact sets" /></Field>
   </>;
   const toolbar = <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
     {problem && <Button variant="ghost" onClick={() => ai.configured ? setChoosingSettings(true) : notifyAiSetupRequired()} disabled={working}><Sparkles size={16} />New problem</Button>}

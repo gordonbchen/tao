@@ -29,3 +29,15 @@ export async function organizeTopicsWithAi(subject: string, tree: Outline[], uno
   );
   return pathsBesideTopics(parsePlacements(value, 500), tree);
 }
+
+// Proposes merging overlapping topics drawn from one course file (or from none), renaming unclear ones, and removing
+// ones that are not course material. The student reviews each change before anything happens.
+export async function cleanupTopicsWithAi(subject: string, file: { name: string; words: number; summary: string } | null, topics: { name: string; about: string; folder: string; otherFiles: string[] }[], options: AiOptions = {}) {
+  const { value } = await generateStructuredText(
+    "topic_cleanup",
+    `Tidy a student's course topics so each one is a distinct idea worth studying separately, as in a well-made course outline. ${file ? "These are all the topics the student has drawn from one course file, given with its summary and length; some also draw on other files. Topics were suggested one file at a time, so they often overlap or slice one short file too thinly: one lecture's slides rarely hold more than three to six ideas that deserve their own topic." : "These topics are linked to no course file, so judge them by their names and descriptions."} Propose only clear improvements: merge topics that cover largely the same material, or that are too small to study apart from each other, into one topic with a concise, specific name (which may be one of theirs); rename a topic whose name is vague or misleading; remove a topic that is not course content, such as course logistics or study advice. Keep genuinely different ideas apart, and do not split topics. Use each topic's exact name, include each topic in at most one change, and leave topics that are fine out entirely; return no changes if they are already clean. Give each change a one-sentence reason a student would find convincing. Return JSON with a changes array of objects with action (merge, rename, or remove), topics (exact names), name (the new name; empty for remove), and reason.`,
+    JSON.stringify({ subject, file, topics }),
+    options,
+  );
+  return value;
+}

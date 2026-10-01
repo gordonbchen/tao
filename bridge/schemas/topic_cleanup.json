@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["merge", "rename", "remove"] },
+          "topics": { "type": "array", "items": { "type": "string" } },
+          "name": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["action", "topics", "name", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["changes"],
+  "additionalProperties": false
+}

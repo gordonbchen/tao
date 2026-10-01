@@ -64,6 +64,31 @@ export async function aiApi<T>(path: string, init: RequestInit = {}): Promise<T>
   finally { init.signal?.removeEventListener("abort", cancel); }
 }
 
+// An AI request, like `aiApi`, whose reply is one JSON object per line; `onLine` gets each one as it arrives.
+export async function aiStream<T>(path: string, init: RequestInit, onLine: (value: T) => void) {
+  const id = requestId();
+  const cancel = () => void fetch(`/api/ai/requests/${id}`, { method: "DELETE" }).catch(() => undefined);
+  init.signal?.addEventListener("abort", cancel, { once: true });
+  const headers = new Headers(init.headers);
+  headers.set("X-Tao-AI-Model", requestModel);
+  headers.set("X-Tao-Request-Id", id);
+  try {
+    const response = await fetch(path, { ...init, headers });
+    if (!response.ok || !response.body) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? "Something went wrong. Please try again.");
+    }
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let rest = "";
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      const lines = (rest + chunk.value).split("\n");
+      rest = lines.pop() ?? "";
+      for (const line of lines) if (line.trim()) onLine(JSON.parse(line) as T);
+    }
+    if (rest.trim()) onLine(JSON.parse(rest) as T);
+  } finally { init.signal?.removeEventListener("abort", cancel); }
+}
+
 // Whether a request failed because the student stopped it.
 export function isAbort(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";

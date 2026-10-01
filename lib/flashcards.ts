@@ -45,3 +45,10 @@ export function formatInterval(ms: number) {
   if (days < 365) return `${Math.round(days / 30)}mo`;
   return `${Math.round(days / 36.5) / 10}y`;
 }
+
+// What two card fronts share when they ask the same thing in the same words: case, punctuation, spacing, and leading
+// filler such as "What is" or "Around when" are ignored.
+export function frontKey(front: string) {
+  return front.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+    .replace(/^(?:(?:around|approximately|about|roughly) )?(?:(?:what|when|which|who|how|why|where)(?: is| are| was| were| does| do| did)? )?/, "");
+}

@@ -42,10 +42,10 @@ export async function topicExcerpts(subjectId: string, topic: { id: string; name
 }
 
 // Generates and stores a problem. Without a chosen difficulty, it follows the topic's review history.
-export async function createProblem(subjectId: string, topic: PracticeTopic, aiOptions: AiOptions, settings: { difficulty?: ProblemDifficulty; answerDepth: ProblemDepth }) {
+export async function createProblem(subjectId: string, topic: PracticeTopic, aiOptions: AiOptions, settings: { difficulty?: ProblemDifficulty; answerDepth: ProblemDepth; instructions?: string }) {
   const subject = await query<{ name: string }>("SELECT name FROM subjects WHERE id = $1 AND owner_id = $2", [subjectId, LOCAL_OWNER_ID]);
   const difficulty = settings.difficulty ?? chooseProblemDifficulty(await topicReview(topic.id));
-  const { answerDepth } = settings;
+  const { answerDepth, instructions } = settings;
   const { excerpts, sources } = await topicExcerpts(subjectId, topic);
   const recentResult = await query<{ prompt: string }>(
     `SELECT prompt FROM problems WHERE subject_id = $1 AND topic_id = $2 ORDER BY created_at DESC LIMIT 5`,
@@ -67,10 +67,10 @@ export async function createProblem(subjectId: string, topic: PracticeTopic, aiO
     ...subjectFeedbackResult.rows.map((row) => ({ ...row, note: row.note.slice(0, 350), scope: "this subject" as const })),
   ];
   const context = { subject: subject.rows[0].name, topic: topic.name, coverageSummary: topic.coverageSummary, difficulty, answerDepth, excerpts, recentPrompts, recentFeedback };
-  let generated = await generateProblem(context, aiOptions);
+  let generated = await generateProblem(context, aiOptions, instructions);
   if (isNearDuplicatePrompt(generated.prompt, recentPrompts)) {
     const avoidPrompts = [generated.prompt, ...recentPrompts].slice(0, 6);
-    generated = await generateProblem({ ...context, recentPrompts: avoidPrompts }, aiOptions);
+    generated = await generateProblem({ ...context, recentPrompts: avoidPrompts }, aiOptions, instructions);
     if (isNearDuplicatePrompt(generated.prompt, avoidPrompts)) throw new Error("The tutor repeated a recent problem. Try again for a different question.");
   }
   const allowedSources = new Set(sources);
@@ -78,7 +78,7 @@ export async function createProblem(subjectId: string, topic: PracticeTopic, aiO
   const result = await query<Omit<ServedProblem, "topicName">>(`INSERT INTO problems(subject_id, topic_id, prompt, solution, hints, difficulty, source_refs, generation_metadata, served_at, diagram, solution_diagram)
     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, now(), $9::jsonb, $10::jsonb)
     RETURNING id, topic_id AS "topicId", prompt, difficulty, source_refs AS "sourceRefs", diagram, created_at AS "createdAt"`,
-  [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider, model: generated.model, answerDepth, difficultyChosen: Boolean(settings.difficulty) }),
+  [subjectId, topic.id, generated.prompt, generated.solution, JSON.stringify(generated.hints), difficulty, JSON.stringify(sourceRefs), JSON.stringify({ provider: generated.provider, model: generated.model, answerDepth, difficultyChosen: Boolean(settings.difficulty), ...(instructions ? { instructions } : {}) }),
     generated.diagram && JSON.stringify(generated.diagram), generated.solutionDiagram && JSON.stringify(generated.solutionDiagram)]);
   return { ...result.rows[0], topicName: topic.name } satisfies ServedProblem;
 }

@@ -5,14 +5,17 @@ import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExtern
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, placeInTree, positionAt, siblingPositions } from "@/lib/topic-tree";
-import { aiApi, api, AppShell, getAiRequestHeaders, isAbort, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
+import { aiApi, aiStream, api, AppShell, getAiRequestHeaders, isAbort, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { SavedChat } from "../../chat";
 import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
+import type { CleanupAction } from "@/lib/topic-cleanup";
 import { TopicTree, UNORGANIZED, type Group, type Topic, type TreeActions, type TreeItem } from "./topic-tree";
 
 type Resource = { id: string; filename: string; contentType?: string; extractionStatus?: string; summaryStatus?: string; topicIds?: string[]; suggestedTopics?: string[] };
 type LinkedTopic = { id: string; name: string };
+type CleanupChange = { action: CleanupAction; topics: { id: string; name: string; cards: number; problems: number }[]; name: string; reason: string };
+const toggled = <T,>(set: Set<T>, item: T) => { const next = new Set(set); if (!next.delete(item)) next.add(item); return next; };
 type LinkedResource = { id: string; filename: string };
 type GroupDetail = Group & { summary: string; summaryStatus: "not_generated" | "stale" | "complete"; summaryProvider?: string | null; summaryModel?: string | null; topicCount: number; resources: LinkedResource[] };
 type TopicDetail = Topic & { subjectId: string; coverageSummary: string; summaryProvider?: string | null; summaryModel?: string | null; resources: LinkedResource[] };
@@ -44,6 +47,9 @@ function SubjectContent() {
   const startEditing = (itemId: string | null, onlyRename = false) => { setEditingId(itemId); setRenameOnly(onlyRename); };
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [organizing, setOrganizing] = useState<{ topics: (Topic & { path: string[] })[] } | "loading" | null>(null);
+  // Proposed topic merges, renames, and removals as they arrive, with the indexes of the ones the student keeps and
+  // how many of the model's requests (one per course file) have finished.
+  const [cleaning, setCleaning] = useState<{ changes: CleanupChange[]; kept: Set<number>; finished: number; total: number; running: boolean; error: string } | null>(null);
   // A folder dropped on Unorganized, waiting for the student to confirm that it will be deleted.
   const [unfiling, setUnfiling] = useState<Group | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState<Set<string>>(new Set());
@@ -355,6 +361,33 @@ function SubjectContent() {
     setOrganizing(null);
     await api(`/api/subjects/${id}/tree`, { method: "PUT", headers: json, body: JSON.stringify({ topics: placements }) }).catch(failed("Could not place the topics"));
     await refresh();
+  }
+
+  async function proposeCleanup() {
+    if (!aiSettings.configured) { notifyAiSetupRequired(); return; }
+    setCleaning({ changes: [], kept: new Set(), finished: 0, total: 0, running: true, error: "" });
+    const update = (change: (current: NonNullable<typeof cleaning>) => Partial<NonNullable<typeof cleaning>>) => setCleaning((current) => current && { ...current, ...change(current) });
+    const signal = stoppable("cleanup");
+    try {
+      await aiStream<{ total?: number; change?: CleanupChange; finished?: boolean; error?: string }>(`/api/subjects/${id}/topics/cleanup`, { method: "POST", signal }, (event) => {
+        if (event.total) update(() => ({ total: event.total }));
+        if (event.change) { const change = event.change; update((current) => ({ changes: [...current.changes, change], kept: new Set(current.kept).add(current.changes.length) })); }
+        if (event.finished) update((current) => ({ finished: current.finished + 1 }));
+        if (event.error) { const error = event.error; update(() => ({ error })); }
+      });
+    } catch (e) { if (!isAbort(e)) update(() => ({ error: e instanceof Error ? e.message : "Could not clean up topics" })); }
+    finally { finished("cleanup", signal); update(() => ({ running: false })); }
+  }
+  const closeCleaning = () => { stopRequest("cleanup"); setCleaning(null); };
+
+  // Merged topics draw on more resources, so their summaries are written again.
+  async function applyCleanup() {
+    if (!cleaning) return;
+    const changes = cleaning.changes.filter((_, index) => cleaning.kept.has(index)).map(({ action, topics: members, name }) => ({ action, topics: members.map((topic) => topic.id), name }));
+    setCleaning(null);
+    const result = await api<{ refreshTopicIds: string[] }>(`/api/subjects/${id}/topics/cleanup`, { method: "PUT", headers: json, body: JSON.stringify({ changes }) }).catch(failed("Could not change the topics"));
+    await refresh();
+    if (result) queueTopicSummaries(result.refreshTopicIds);
   }
 
   const treeActions: TreeActions = {
@@ -711,6 +744,7 @@ function SubjectContent() {
         <section className="mb-12">
           <div className={`${sectionHead} flex-wrap`}><h2 className="text-xl font-semibold">Topics</h2>
             <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
+              <Button variant="ghost" onClick={() => void proposeCleanup()} disabled={cleaning !== null || !aiSettings.ready || topics.length < 2} title="Have the model merge overlapping topics, rename unclear ones, and remove ones that are not course material"><Sparkles size={16} />Clean up</Button>
               <IconButton label="New folder" onClick={() => void addFolder()}><FolderPlus size={20} /></IconButton>
               <form className="flex items-center gap-2 max-sm:order-first max-sm:w-full" onSubmit={addTopic}><Input className="w-56 max-sm:w-auto max-sm:flex-1" aria-label="Topic name" value={topicName} maxLength={160} onChange={e => setTopicName(e.target.value)} placeholder="Add a topic" /><IconButton type="submit" label="Add topic" className="border border-line bg-surface" disabled={!topicName.trim() || busy}><Plus size={18} /></IconButton></form>
             </div>
@@ -811,6 +845,30 @@ function SubjectContent() {
           <div className="mt-6 flex justify-end gap-2"><Button onClick={closeOrganizing}>Cancel</Button><Button variant="primary" disabled={!organizing.topics.length} onClick={() => void applyOrganization()}>Apply</Button></div>
         </>;
       })()}
+    </Modal>}
+
+    {cleaning && <Modal wide title="Clean up topics" onClose={closeCleaning}>
+      <p className="mb-4 text-muted">Uncheck any change you don’t want. A merged topic keeps every card, problem, resource, and chat of the topics it replaces; a removed topic’s cards and problems stay, unfiled.</p>
+      {cleaning.running && pending(cleaning.total ? `Checking the topics of each file, ${cleaning.finished} of ${cleaning.total} done…` : "Looking for overlapping and unclear topics…", <Button size="sm" variant="ghost" onClick={() => stopRequest("cleanup")}>Stop</Button>)}
+      {cleaning.error && <ErrorMessage>{cleaning.error}</ErrorMessage>}
+      {!cleaning.running && !cleaning.changes.length ? <p className="py-6 text-muted">The model found nothing to merge, rename, or remove.</p>
+      : cleaning.changes.length > 0 && <ul className="border-t border-line">{cleaning.changes.map((change, index) => {
+          const cards = change.topics.reduce((sum, topic) => sum + topic.cards, 0);
+          const problems = change.topics.reduce((sum, topic) => sum + topic.problems, 0);
+          const counts = [cards && `${cards} ${cards === 1 ? "card" : "cards"}`, problems && `${problems} ${problems === 1 ? "problem" : "problems"}`].filter(Boolean).join(" and ");
+          return <li key={index} className="border-b border-line"><label className="flex cursor-pointer gap-3 py-3">
+            <input type="checkbox" className="mt-1.5 size-4 flex-none accent-accent" checked={cleaning.kept.has(index)} onChange={() => setCleaning({ ...cleaning, kept: toggled(cleaning.kept, index) })} />
+            <span className="min-w-0">
+              <span className="block break-words">
+                <span className="text-muted">{change.action === "merge" ? "Merge" : change.action === "rename" ? "Rename" : "Remove"} </span>
+                {change.topics.map((topic) => topic.name).join(", ")}
+                {change.name && <><span className="text-muted"> into </span><span className="font-semibold">{change.name}</span></>}
+              </span>
+              <span className="block text-sm text-muted">{change.reason}{change.action === "remove" && counts && ` Its ${counts} will be unfiled.`}</span>
+            </span>
+          </label></li>;
+        })}</ul>}
+      <div className="mt-6 flex justify-end gap-2"><Button onClick={closeCleaning}>Cancel</Button><Button variant="primary" disabled={cleaning.running || !cleaning.kept.size} onClick={() => void applyCleanup()}>Apply {cleaning.kept.size} {cleaning.kept.size === 1 ? "change" : "changes"}</Button></div>
     </Modal>}
 
     {unfiling && (() => {

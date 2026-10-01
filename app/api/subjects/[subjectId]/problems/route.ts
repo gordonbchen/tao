@@ -1,4 +1,4 @@
-import { aiOptionsFromRequest, hasAiProvider, PROBLEM_DEPTHS, type ProblemDepth } from "@/lib/ai";
+import { aiOptionsFromRequest, hasAiProvider, MAX_INSTRUCTIONS, PROBLEM_DEPTHS, type ProblemDepth } from "@/lib/ai";
 import { isUuid, jsonError, query } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
 import { createProblem, listProblems, pickTopic, topicReview } from "@/lib/practice";
@@ -19,13 +19,15 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
   const aiOptions = aiOptionsFromRequest(request);
   if (!hasAiProvider()) return jsonError("Sign in to an AI account before practicing", 409);
-  let body: { topicIds?: unknown; groupIds?: unknown; skipReuse?: unknown; difficulty?: unknown; answerDepth?: unknown };
+  let body: { topicIds?: unknown; groupIds?: unknown; skipReuse?: unknown; difficulty?: unknown; answerDepth?: unknown; instructions?: unknown };
   try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
   if (body.skipReuse !== undefined && typeof body.skipReuse !== "boolean") return jsonError("skipReuse must be a boolean");
   const difficulty = body.difficulty ?? "auto";
   if (!["auto", "easy", "okay", "hard"].includes(difficulty as string)) return jsonError("difficulty must be auto, easy, okay, or hard");
   const answerDepth = body.answerDepth ?? "standard";
   if (!PROBLEM_DEPTHS.includes(answerDepth as ProblemDepth)) return jsonError(`answerDepth must be one of ${PROBLEM_DEPTHS.join(", ")}`);
+  if (body.instructions !== undefined && (typeof body.instructions !== "string" || body.instructions.length > MAX_INSTRUCTIONS)) return jsonError(`instructions must be text of at most ${MAX_INSTRUCTIONS} characters`);
+  const instructions = (body.instructions as string | undefined)?.trim() || undefined;
   const selection = selectionFromBody(body);
   if (typeof selection === "string") return jsonError(selection);
   const topic = await pickTopic(subjectId, selection);
@@ -42,8 +44,9 @@ export async function POST(request: Request, { params }: RouteContext) {
     [subjectId, topic.id],
   );
   const lastAttempt = lastAttemptResult.rows[0];
-  // With Auto difficulty, a due problem the student could not solve comes back before a new one. skipReuse asks for a new one.
-  if (difficulty === "auto" && !body.skipReuse && shouldReuseDueProblem((await topicReview(topic.id))?.dueAt, lastAttempt && { ...lastAttempt, createdAt: lastAttempt.lastAttemptAt }, new Date())) {
+  // With Auto difficulty and no request of their own, a due problem the student could not solve comes back before a new
+  // one. skipReuse asks for a new one.
+  if (difficulty === "auto" && !instructions && !body.skipReuse && shouldReuseDueProblem((await topicReview(topic.id))?.dueAt, lastAttempt && { ...lastAttempt, createdAt: lastAttempt.lastAttemptAt }, new Date())) {
     return Response.json({ problem: {
       id: lastAttempt.id, topicId: lastAttempt.topicId, topicName: lastAttempt.topicName,
       prompt: lastAttempt.prompt, difficulty: lastAttempt.difficulty, sourceRefs: lastAttempt.sourceRefs,
@@ -51,7 +54,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     } });
   }
   try {
-    const problem = await createProblem(subjectId, topic, aiOptions, { difficulty: difficulty === "auto" ? undefined : difficulty as ProblemDifficulty, answerDepth: answerDepth as ProblemDepth });
+    const problem = await createProblem(subjectId, topic, aiOptions, { difficulty: difficulty === "auto" ? undefined : difficulty as ProblemDifficulty, answerDepth: answerDepth as ProblemDepth, instructions });
     return Response.json({ problem }, { status: 201 });
   } catch (error) {
     if (aiOptions.signal?.aborted) return jsonError("Request cancelled", 499);
