@@ -13,7 +13,7 @@ type MathJaxApi = {
 };
 
 declare global {
-  interface Window { MathJax?: Partial<MathJaxApi> & Record<string, unknown> }
+  interface Window { MathJax?: Partial<Omit<MathJaxApi, "startup">> & { startup?: Partial<MathJaxApi["startup"]> & { typeset?: boolean } } & Record<string, unknown> }
 }
 
 let loading: Promise<MathJaxApi> | undefined;
@@ -36,6 +36,8 @@ export function loadMathJax(): Promise<MathJaxApi> {
       },
       svg: { fontCache: "global" },
       output: { fontPath: "/mathjax-font" },
+      // Each component typesets its own text. A page-wide pass would also catch text meant to stay raw.
+      startup: { typeset: false },
     };
     const script = document.createElement("script");
     script.src = "/mathjax/tex-svg.js";
@@ -81,6 +83,24 @@ export function MathText({ text, className }: { text: string; className?: string
     return typeset(element, (mathjax) => { mathjax.typesetClear([element]); element.textContent = text; }, () => { element.textContent = text; });
   }, [text]);
   return <div ref={ref} className={className}>{text}</div>;
+}
+
+// One line of math text, cut off with an ellipsis, for list rows: display math is set inline, line breaks become
+// spaces, and long text is shortened without leaving a formula open.
+export function MathLine({ text, className }: { text: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  let line = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, tex) => `\\(${tex}\\)`).replace(/\$\$([\s\S]*?)\$\$/g, (_, tex) => `$${tex}$`).replace(/\s+/g, " ").trim();
+  if (line.length > 240) {
+    line = line.slice(0, 240);
+    if (line.split("\\(").length > line.split("\\)").length) line = line.slice(0, line.lastIndexOf("\\("));
+    if (line.split("$").length % 2 === 0) line = line.slice(0, line.lastIndexOf("$"));
+  }
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return typeset(element, (mathjax) => { mathjax.typesetClear([element]); element.textContent = line; }, () => { element.textContent = line; });
+  }, [line]);
+  return <span ref={ref} className={["math-line block truncate", className].filter(Boolean).join(" ")}>{line}</span>;
 }
 
 export function MarkdownMathText({ text, className }: { text: string; className?: string }) {

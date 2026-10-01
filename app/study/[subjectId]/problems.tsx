@@ -6,7 +6,7 @@ import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
-import { MathText } from "../../math-text";
+import { MathLine, MathText } from "../../math-text";
 import { Badge, Button, Card, cn, ErrorMessage, Field, Modal, Select, Spinner, Textarea, ToggleButton } from "../../ui";
 import { BrowseDialog, type BrowseAction } from "./browse";
 import { selectionQuery, type StudySelection } from "./selection";
@@ -199,9 +199,13 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   </div>;
   const dialogs = <>
     {browsing && <BrowseDialog<PastProblem> noun="problem" url={`/api/subjects/${subjectId}/problems?${selectionQuery(selection)}`} field="problems" endpoint={`/api/subjects/${subjectId}/problems`}
-      columns="grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto]" searchText={(past) => `${past.prompt}\n${past.topicName ?? ""}`}
+      columns="grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto]"
+      filters={{ unanswered: { label: "Not answered", test: (past) => !past.attempts }, answered: { label: "Answered", test: (past) => past.attempts > 0 },
+        missed: { label: "Wrong or partial", test: (past) => past.correctness === "incorrect" || past.correctness === "partial" } }}
+      sorts={{ topic: { label: "By topic", compare: (a, b) => (a.topicName ?? "").localeCompare(b.topicName ?? "") } }}
+      searchText={(past) => `${past.prompt}\n${past.topicName ?? ""}`}
       cells={(past) => <>
-        <span className="truncate">{past.prompt}</span>
+        <MathLine text={past.prompt} />
         <span className="truncate text-muted">{past.topicName ?? "No topic"}</span>
         <span className="text-xs text-muted">{past.correctness ? resultLabels[past.correctness] : past.skipped ? "Skipped" : "Not answered"} · {new Date(past.createdAt).toLocaleDateString()}</span>
       </>}

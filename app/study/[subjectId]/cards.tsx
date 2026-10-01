@@ -7,7 +7,7 @@ import { buildTree, flattenTree, groupPath, type TreeGroup, type TreeTopic } fro
 import { aiApi, aiStream, api, getAiRequestHeaders, notifyAiSetupRequired, pendingRemovals, scheduleUndoDelete, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
-import { MathText } from "../../math-text";
+import { MathLine, MathText } from "../../math-text";
 import { Badge, Button, Card, Checkbox, cn, ErrorMessage, Field, IconButton, Modal, Select, Spinner, Textarea } from "../../ui";
 import { BrowseDialog } from "./browse";
 import { selectionLabel, SelectionDialog, selectionQuery, type StudySelection } from "./selection";
@@ -156,10 +156,14 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
     {dialog?.kind === "import" && <ImportDialog subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
     {dialog?.kind === "generate" && <GenerateDialog subjectId={subjectId} topics={topics} groups={groups} selection={selection} onClose={closeDialog} />}
     {dialog?.kind === "browse" && <BrowseDialog<StoredCard> noun="card" url={`/api/subjects/${subjectId}/cards?${query}`} field="cards" endpoint={`/api/subjects/${subjectId}/cards`}
-      columns="grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" searchText={(stored) => `${stored.front}\n${stored.back}\n${stored.topicName ?? ""}`}
+      columns="grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+      filters={{ new: { label: "New", test: (stored) => stored.state === 0 }, due: { label: "Due", test: (stored) => stored.state !== 0 && Date.parse(stored.due) <= Date.now() } }}
+      sorts={{ due: { label: "Due soonest", compare: (a, b) => Number(a.state === 0) - Number(b.state === 0) || Date.parse(a.due) - Date.parse(b.due) },
+        topic: { label: "By topic", compare: (a, b) => (a.topicName ?? "").localeCompare(b.topicName ?? "") } }}
+      searchText={(stored) => `${stored.front}\n${stored.back}\n${stored.topicName ?? ""}`}
       cells={(stored) => <>
-        <span className="truncate">{stored.front}</span>
-        <span className="truncate text-muted">{stored.back}</span>
+        <MathLine text={stored.front} />
+        <MathLine className="text-muted" text={stored.back} />
         <span className="text-xs text-muted">{stored.state === 0 ? "New" : `Due ${new Date(stored.due).toLocaleDateString()}`}</span>
       </>}
       onOpen={(stored) => setDialog({ kind: "edit", card: stored })} onChange={() => void load()} onClose={() => closeDialog(false)} />}
