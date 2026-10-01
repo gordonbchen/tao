@@ -58,7 +58,7 @@ type Context = {
 };
 
 export const AI_PROVIDERS = {
-  codex: { label: "Codex", socket: "/run/tao-codex/socket", models: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"], defaultModel: process.env.CODEX_MODEL },
+  codex: { label: "Codex", socket: "/run/tao-codex/socket", models: ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"], defaultModel: process.env.CODEX_MODEL },
   claude: { label: "Claude", socket: "/run/tao-claude/socket", models: ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5"], defaultModel: process.env.CLAUDE_MODEL },
   // OpenCode's models depend on which providers it is signed in to; its sidecar lists them as provider/model.
   opencode: { label: "OpenCode", socket: "/run/tao-opencode/socket", models: [], defaultModel: process.env.OPENCODE_MODEL },

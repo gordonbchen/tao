@@ -127,7 +127,7 @@ createServer(async (request, response) => {
     const { kind, system, input, model: requestedModel } = JSON.parse(raw);
     if (!kinds.has(kind)) throw new Error("Invalid request");
     if (typeof system !== "string" || typeof input !== "string") throw new Error("Invalid request");
-    if (requestedModel !== undefined && !["gpt-6-luna", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"].includes(requestedModel)) throw new Error("Unsupported Codex model");
+    if (requestedModel !== undefined && !["gpt-6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"].includes(requestedModel)) throw new Error("Unsupported Codex model");
     // The app closes the connection when the student cancels.
     const cancelled = new AbortController();
     response.on("close", () => cancelled.abort());
