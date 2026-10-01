@@ -10,7 +10,8 @@ import { topicNames } from "@/lib/topic-groups";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ subjectId: string }> };
-const MAX_BYTES = 10 * 1024 * 1024;
+// Lecture PDFs are mostly images, and only their text is extracted and stored in the database.
+const MAX_BYTES = 200 * 1024 * 1024;
 const MAX_TEXT = 200_000;
 
 export async function POST(request: Request, { params }: RouteContext) {
@@ -20,7 +21,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   try { form = await request.formData(); } catch { return jsonError("Expected multipart form data"); }
   const uploaded = form.get("file");
   if (!(uploaded instanceof File)) return jsonError("Choose a text, Markdown, or PDF file");
-  if (uploaded.size < 1 || uploaded.size > MAX_BYTES) return jsonError("File must be between 1 byte and 10 MB");
+  if (uploaded.size < 1 || uploaded.size > MAX_BYTES) return jsonError("File must be between 1 byte and 200 MB");
   const ext = path.extname(uploaded.name).toLowerCase();
   if (![".txt", ".md", ".pdf"].includes(ext)) return jsonError("Supported file types are .txt, .md, and .pdf");
   const bytes = Buffer.from(await uploaded.arrayBuffer());

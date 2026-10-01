@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BookOpen, BookPlus, Check, FileText, FolderPlus, MessageSquare, Pencil, Plus, Sparkles, Trash2, X, type LucideIcon } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, groupPath, placeInTree, positionAt, siblingPositions } from "@/lib/topic-tree";
 import { aiApi, aiStream, api, AppShell, getAiRequestHeaders, isAbort, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
@@ -38,6 +38,7 @@ function SubjectContent() {
   const router = useRouter();
   const aiSettings = useAISettings();
   const [subject, setSubject] = useState<Subject | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -208,6 +209,16 @@ function SubjectContent() {
 
   const json = { "Content-Type": "application/json" };
   const failed = (fallback: string) => (e: unknown) => setError(e instanceof Error ? e.message : fallback);
+
+  async function renameSubject(name: string) {
+    setRenaming(false);
+    if (!subject || !name || name === subject.name) return;
+    try {
+      const updated = await api<Subject>(`/api/subjects/${subject.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ name }) });
+      setSubject(updated);
+      document.title = `Tao - ${updated.name}`;
+    } catch (e) { failed("Could not rename subject")(e); }
+  }
 
   // Moves and renames apply at once and are then confirmed by a refresh.
   // Without a position, an item moved to another folder (or to Unorganized, given as UNORGANIZED) goes last in it.
@@ -725,7 +736,15 @@ function SubjectContent() {
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
     {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid grid-cols-[minmax(0,1fr)] gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
       <div>
-        <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
+        <div className="mb-10 flex flex-wrap items-center justify-between gap-4">{renaming
+          ? <form className="flex min-w-0 flex-1 items-center gap-2" onSubmit={(event) => { event.preventDefault(); renameSubject(new FormData(event.currentTarget).get("name")?.toString().trim() ?? ""); }}
+            onKeyDown={(event) => { if (event.key === "Escape") setRenaming(false); }}>
+            <Input name="name" className="min-w-40 flex-1" aria-label="Subject name" autoFocus onFocus={(event) => event.currentTarget.select()} maxLength={120} defaultValue={subject.name} />
+            <IconButton type="submit" label="Save name"><Check size={18} /></IconButton>
+            <IconButton label="Cancel renaming" onClick={() => setRenaming(false)}><X size={18} /></IconButton>
+          </form>
+          : <div className="flex min-w-0 items-center gap-2"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
+            <IconButton label="Rename subject" onClick={() => setRenaming(true)}><Pencil size={18} /></IconButton></div>}
           <div className="flex flex-wrap items-center gap-4">
             <ToggleButton size="md" pressed={subjectChatOpen} onClick={toggleSubjectChat}><MessageSquare size={18} />Chat</ToggleButton>
             <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
