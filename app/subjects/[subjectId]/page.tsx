@@ -8,7 +8,7 @@ import { buildTree, descendantGroupIds, flattenTree, groupPath, placeInTree, pos
 import { aiApi, aiStream, api, AppShell, getAiRequestHeaders, isAbort, isPendingRemoval, LoadingCard, notifyAiSetupRequired, scheduleUndoDelete, Subject, useAISettings } from "../../components";
 import { MarkdownMathText } from "../../math-text";
 import { SavedChat } from "../../chat";
-import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea } from "../../ui";
+import { Badge, Button, cn, ErrorMessage, IconButton, Input, List, ListItem, Modal, Page, Spinner, Tabs, Textarea, ToggleButton } from "../../ui";
 import type { CleanupAction } from "@/lib/topic-cleanup";
 import { TopicTree, UNORGANIZED, type Group, type Topic, type TreeActions, type TreeItem } from "./topic-tree";
 
@@ -727,7 +727,7 @@ function SubjectContent() {
       <div>
         <div className="mb-10 flex flex-wrap items-center justify-between gap-4"><h1 className="min-w-0 text-display font-semibold break-words">{subject.name}</h1>
           <div className="flex flex-wrap items-center gap-4">
-            <ChatToggle open={subjectChatOpen} onToggle={toggleSubjectChat} />
+            <ToggleButton size="md" pressed={subjectChatOpen} onClick={toggleSubjectChat}><MessageSquare size={18} />Chat</ToggleButton>
             <Button variant="primary" disabled={!topics.length || !aiSettings.ready} onClick={() => startPractice()} title="Practice problems or flashcards. Right-click a topic or folder to study just that.">Practice</Button>
           </div>
         </div>
