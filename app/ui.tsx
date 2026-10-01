@@ -6,6 +6,7 @@ import { useEffect, useRef, type ComponentProps, type KeyboardEvent as ReactKeyb
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { twMerge } from "tailwind-merge";
+import { hasMath, MathPreview } from "./math-text";
 
 export function cn(...classes: (string | false | null | undefined)[]) {
   return twMerge(classes.filter(Boolean).join(" "));
@@ -52,8 +53,14 @@ export function Field({ label, children }: { label: string; children: React.Reac
   return <label className="flex flex-col gap-2 text-sm"><span className="text-muted">{label}</span>{children}</label>;
 }
 
-export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
-  return <textarea className={cn(field, "block w-full resize-y px-3 py-2 leading-relaxed", className)} {...props} />;
+// With `mathPreview` (the default), typed TeX such as $$x^2$$ is shown typeset under the box. Turn it off for raw formats
+// and for layouts that place the preview themselves.
+export function Textarea({ className, mathPreview = true, ...props }: ComponentProps<"textarea"> & { mathPreview?: boolean }) {
+  const box = <textarea className={cn(field, "block w-full resize-y px-3 py-2 leading-relaxed", className)} {...props} />;
+  if (!mathPreview) return box;
+  // The preview is a sibling that comes and goes, so the textarea keeps its place in the tree and its focus.
+  const text = typeof props.value === "string" ? props.value : "";
+  return <div className="flex min-w-0 flex-col gap-2">{box}{hasMath(text) && <MathPreview text={text} />}</div>;
 }
 
 // Native checkbox in the accent color. `indeterminate` shows a partial choice, such as some rows of a list.
@@ -86,13 +93,14 @@ export function Page({ className, ...props }: ComponentProps<"main">) {
   return <main className={cn("mx-auto w-full max-w-4xl px-6 pt-12 pb-16 max-sm:px-4 max-sm:pt-6", className)} {...props} />;
 }
 
-type ModalProps = { title: ReactNode; label?: string; subtitle?: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode };
+// A `bare` modal has no title row or padding: its child, such as an enlarged chat, fills a wide modal's frame.
+type ModalProps = { title: ReactNode; label?: string; subtitle?: ReactNode; onClose: () => void; wide?: boolean; bare?: boolean; children: ReactNode };
 
 // Dialog with a backdrop, title row, and close button. Escape and backdrop clicks close it.
 // Open modals, innermost last: Escape closes only the top one, such as an enlarged figure over a viewer.
 const openModals: object[] = [];
 
-export function Modal({ title, label, subtitle, onClose, wide, children }: ModalProps) {
+export function Modal({ title, label, subtitle, onClose, wide, bare, children }: ModalProps) {
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; });
   useEffect(() => {
@@ -106,17 +114,20 @@ export function Modal({ title, label, subtitle, onClose, wide, children }: Modal
   // Wide dialogs fill the screen, less a margin, whatever they hold, so loading content or switching tabs never
   // resizes them. They are flex columns, so a panel that may shrink (min-h-0) can fill exactly the height left
   // under the title and tabs, like a viewer's chat.
-  return createPortal(<div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide ? "overflow-hidden max-sm:p-0" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <div role="dialog" aria-modal="true" aria-label={label ?? (typeof title === "string" ? title : undefined)} className={cn(
+  const dialogLabel = label ?? (typeof title === "string" ? title : undefined);
+  const wideFrame = "flex h-[calc(100dvh-48px)] max-w-7xl flex-col max-sm:h-dvh max-sm:rounded-none max-sm:border-0";
+  return createPortal(<div className={cn("fixed inset-0 z-20 grid place-items-center bg-backdrop p-6 max-sm:p-4", wide || bare ? "overflow-hidden max-sm:p-0" : "overflow-auto")} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    {bare ? <div role="dialog" aria-modal="true" aria-label={dialogLabel} className={cn("w-full rounded-lg shadow-float", wideFrame)}>{children}</div>
+    : <div role="dialog" aria-modal="true" aria-label={dialogLabel} className={cn(
       "w-full overflow-auto [scrollbar-gutter:stable] rounded-lg border border-line bg-paper p-6 shadow-float max-sm:p-4",
-      wide ? "flex h-[calc(100dvh-48px)] max-w-7xl flex-col max-sm:h-dvh max-sm:rounded-none max-sm:border-0" : "max-h-[90vh] max-w-lg",
+      wide ? wideFrame : "max-h-[90vh] max-w-lg",
     )}>
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="min-w-0"><h2 className="text-xl font-semibold break-words">{title}</h2>{subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}</div>
         <IconButton label="Close" onClick={onClose}><X size={20} /></IconButton>
       </div>
       {children}
-    </div>
+    </div>}
   </div>, document.body);
 }
 

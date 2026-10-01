@@ -122,8 +122,8 @@ function SubjectContent() {
   useEffect(() => { document.documentElement.dataset.subjectChat = String(subjectChatOpen); }, [subjectChatOpen]);
   // A viewer's chat has its own tab; wide screens can also show it beside the summary.
   const wide = useMediaQuery("(min-width: 64rem)");
-  const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name}
-    className={beside ? splitChat : "mx-auto h-dvh min-h-80 w-full max-w-3xl"} />;
+  const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name} expandable={beside}
+    className={beside ? splitChat : "h-dvh min-h-80 w-full"} />;
   // Starts a request that `stopRequest(key)` can abort; `finished` forgets it.
   function stoppable(key: string) {
     const controller = new AbortController();
@@ -736,7 +736,7 @@ function SubjectContent() {
 
       {/* Above topics and resources on narrow screens; beside them, and in view while the page scrolls, on wide ones. */}
       {subjectChat && <div className="self-start max-lg:mb-12 max-lg:w-full lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} className="max-lg:h-[calc(100dvh-18rem)] lg:h-[min(40rem,calc(100dvh-14rem))]"
+        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} expandable className="max-lg:h-[calc(100dvh-18rem)] lg:h-[min(40rem,calc(100dvh-14rem))]"
           empty="Ask about your progress, weakest topics, or what to study next, or about the course material." />
       </div>}
 
@@ -888,7 +888,7 @@ function SubjectContent() {
       : topicTab === "summary" ? <WithChat open={chatOpen && wide} chat={viewerChat(`/api/topics/${topicDetail.id}/chat`, topicDetail.id, topicDetail.name, true)}><section role="tabpanel" aria-label="Topic coverage summary">
         {summarizingTopicIds.includes(topicDetail.id) || topicDetail.summaryStatus === "pending" ? pending("Summarizing linked material…", summarizingTopicIds.includes(topicDetail.id) && <Button size="sm" variant="ghost" onClick={() => stopRequest(`topic-summary:${topicDetail.id}`)}>Stop</Button>) : topicDetail.coverageSummary ? <>
           {topicDetail.summaryStatus !== "complete" && <p className="mb-4 rounded-md border border-warning-line bg-warning-soft px-4 py-3 text-sm">Linked resources changed. Refresh this summary to reflect them.</p>}
-          {topicEditingSummary ? <Textarea className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
+          {topicEditingSummary ? <Textarea mathPreview={false} className="min-h-96 font-mono text-sm" aria-label="Editable topic summary" value={topicDetail.coverageSummary} onChange={(event) => setTopicDetail({ ...topicDetail, coverageSummary: event.target.value })} /> : <MarkdownMathText text={topicDetail.coverageSummary} />}
           <div className="mt-6 flex flex-wrap justify-end gap-2">{topicEditingSummary ? <Button onClick={() => void saveTopicSummary()}>Save edits</Button> : <Button onClick={() => setTopicEditingSummary(true)}>Edit</Button>}<Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Refresh from resources</Button></div>
         </> : <div className="flex flex-col items-start gap-4 py-4"><p className="text-muted">{topicDetail.resources.length ? "Create an editable summary of the material linked to this topic." : "Link one or more resources to build a topic summary."}</p><Button variant="primary" disabled={!topicDetail.resources.length} onClick={() => void generateTopicSummary(topicDetail.id)}>Create summary</Button></div>}
       </section></WithChat> : <section role="tabpanel" aria-label="Resources linked to topic">

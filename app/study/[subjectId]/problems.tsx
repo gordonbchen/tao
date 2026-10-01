@@ -254,7 +254,6 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       {!feedback ? <Card className="p-4"><form onSubmit={submitAttempt}>
         <Textarea ref={answerInput} rows={4} className="min-h-32 border-0 px-0 hover:border-0" aria-label="Your answer" value={answer} onChange={e => { setAnswer(e.target.value); saveDraft(`answer:${problem.id}`, e.target.value); }} placeholder="Write your answer…" />
-        {answer.includes("\\(") || answer.includes("\\[") ? <div className="mt-2 border-t border-line pt-3"><span className="text-xs text-muted">Math preview</span><MathText className="mt-1 whitespace-pre-wrap" text={answer} /></div> : null}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="How hard was it?">{ratings.map(option => <ToggleButton key={option.value} pressed={rating === option.value} onClick={() => setRating(option.value)}>{option.label}</ToggleButton>)}</div>
           <div className="flex items-center gap-2">
@@ -276,6 +275,6 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         </div>
       </section>}
     </div>
-    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
+    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} expandable className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
   </div>{dialogs}</>;
 }

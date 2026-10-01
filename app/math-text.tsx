@@ -4,12 +4,13 @@ import { useLayoutEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { protectMathFromMarkdown } from "@/lib/markdown-math";
 
+type MathItem = { typesetRoot: HTMLElement | null; removeFromDocument: (restore: boolean) => void };
 type MathJaxApi = {
   typeset: (elements: HTMLElement[]) => void;
   typesetPromise: (elements: HTMLElement[]) => Promise<void>;
   typesetClear: (elements: HTMLElement[]) => void;
   tex2svgPromise: (tex: string) => Promise<unknown>;
-  startup: { promise: Promise<void> };
+  startup: { promise: Promise<void>; document: { getMathItemsWithin: (element: HTMLElement) => Iterable<MathItem>; math: { remove: (item: MathItem) => void } } };
 };
 
 declare global {
@@ -57,6 +58,16 @@ export function loadMathJax(): Promise<MathJaxApi> {
   return loading;
 }
 
+// Puts formulas that do not parse, such as one still being typed, back as their source text instead of an error.
+function restoreErrors(mathjax: MathJaxApi, element: HTMLElement) {
+  const document = mathjax.startup.document;
+  for (const item of [...document.getMathItemsWithin(element)]) {
+    if (!item.typesetRoot?.querySelector("[data-mjx-error]")) continue;
+    item.removeFromDocument(true);
+    document.math.remove(item);
+  }
+}
+
 // Typesets `element` before the browser paints it when MathJax is ready and needs nothing more to load; otherwise
 // once it is, which moves the text as the math takes its size. `prepare` resets the element before either attempt.
 function typeset(element: HTMLElement, prepare: (mathjax: MathJaxApi) => void, fallback: () => void) {
@@ -65,16 +76,18 @@ function typeset(element: HTMLElement, prepare: (mathjax: MathJaxApi) => void, f
     if (!active) return;
     prepare(mathjax);
     await mathjax.typesetPromise([element]);
+    if (active) restoreErrors(mathjax, element);
   }).catch(() => { if (active) fallback(); });
   if (loaded) {
     // A synchronous typeset throws when it has to wait for a font file; the asynchronous one then finishes it.
-    try { prepare(loaded); loaded.typeset([element]); } catch { later(); }
+    try { prepare(loaded); loaded.typeset([element]); restoreErrors(loaded, element); } catch { later(); }
   } else later();
   return () => { active = false; window.MathJax?.typesetClear?.([element]); };
 }
 
-export function MathText({ text, className }: { text: string; className?: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+// `as="span"` sets it inside a line of other text, such as a subtitle or a button.
+export function MathText({ text, className, as: Tag = "div" }: { text: string; className?: string; as?: "div" | "span" }) {
+  const ref = useRef<HTMLDivElement & HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -82,7 +95,7 @@ export function MathText({ text, className }: { text: string; className?: string
     // If MathJax cannot load or parse it, the original text stays visible.
     return typeset(element, (mathjax) => { mathjax.typesetClear([element]); element.textContent = text; }, () => { element.textContent = text; });
   }, [text]);
-  return <div ref={ref} className={className}>{text}</div>;
+  return <Tag ref={ref} className={className}>{text}</Tag>;
 }
 
 // One line of math text, cut off with an ellipsis, for list rows: display math is set inline, line breaks become
@@ -101,6 +114,16 @@ export function MathLine({ text, className }: { text: string; className?: string
     return typeset(element, (mathjax) => { mathjax.typesetClear([element]); element.textContent = line; }, () => { element.textContent = line; });
   }, [line]);
   return <span ref={ref} className={["math-line block truncate", className].filter(Boolean).join(" ")}>{line}</span>;
+}
+
+// Whether `text` has a delimited formula that MathText would typeset.
+export function hasMath(text: string) {
+  return /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/.test(text);
+}
+
+// Typed text as it will be shown, under the field it was typed in.
+export function MathPreview({ text, className }: { text: string; className?: string }) {
+  return <MathText className={["rounded-md bg-subtle px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap", className].filter(Boolean).join(" ")} text={text} />;
 }
 
 export function MarkdownMathText({ text, className }: { text: string; className?: string }) {

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, History, Lightbulb, ListCollapse, MessageSquarePlus, Pencil, Send, Square } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, History, Lightbulb, ListCollapse, Maximize2, MessageSquarePlus, Minimize2, Pencil, Send, Square } from "lucide-react";
 import { recentMessages, sinceSummary } from "@/lib/chat-context";
 import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "./components";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { Diagram } from "./diagram";
-import { MathText } from "./math-text";
-import { Button, Card, cn, ErrorMessage, IconButton, Input, Spinner, Textarea } from "./ui";
+import { hasMath, MathPreview, MathText } from "./math-text";
+import { Button, Card, cn, ErrorMessage, IconButton, Input, Modal, Spinner, Textarea } from "./ui";
 
 // A summary stands in for the messages before it when the tutor replies.
 export type ChatMessage = { role: "assistant" | "user" | "summary"; text: string; diagram?: DiagramData | null };
@@ -22,8 +22,9 @@ const when = (date: string) => new Date(date).toLocaleString(undefined, { dateSt
 // `send` returns the tutor's reply; its signal aborts when the student presses Stop. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
 // that message, `summarize` adds a button that condenses the conversation so far, and `clear` one that starts a new chat.
 // `history` adds a list of all chats; `resume` switches to an earlier one, setting the current chat aside. `rename` makes
-// the chat's name editable. `draftKey` keeps the unsent message in this browser as it is typed.
-export function Chat({ initialMessages = [], initialName = "", draftKey, send, placeholder, empty, hint, summarize, clear, history, resume, rename, className }: {
+// the chat's name editable. `draftKey` keeps the unsent message in this browser as it is typed. `expandable` adds a button,
+// on wide screens, that enlarges the chat to a modal; use it where the chat sits beside other content.
+export function Chat({ initialMessages = [], initialName = "", draftKey, send, placeholder, empty, hint, summarize, clear, history, resume, rename, expandable, className }: {
   initialName?: string;
   draftKey?: string;
   initialMessages?: ChatMessage[];
@@ -36,6 +37,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   history?: () => Promise<PastChat[]>;
   resume?: (clearedAt: string) => Promise<void>;
   rename?: (name: string) => Promise<void>;
+  expandable?: boolean;
   className?: string;
 }) {
   const [messages, setMessages] = useState(initialMessages);
@@ -51,18 +53,21 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   const [stopper, setStopper] = useState<AbortController | null>(null);
   // Earlier chats while the chat list is open.
   const [past, setPast] = useState<PastChat[] | null>(null);
+  // Whether the chat is enlarged to a modal. Its state lives here, so only its frame changes.
+  const [expanded, setExpanded] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
 
-  // Grow with the text from one line; max-h-40 then scrolls.
+  // Grow with the text from one line; max-h-40 then scrolls. Enlarging or shrinking the chat makes a new field.
   useLayoutEffect(() => {
     const element = input.current;
     if (!element) return;
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight + element.offsetHeight - element.clientHeight}px`;
-  }, [text]);
+  }, [text, expanded]);
 
-  useEffect(() => { log.current?.scrollTo({ top: past ? 0 : log.current.scrollHeight }); }, [messages, busy, past]);
+  useEffect(() => { log.current?.scrollTo({ top: past ? 0 : log.current.scrollHeight }); }, [messages, busy, past, expanded]);
+  const toggleExpanded = () => { setExpanded((value) => !value); requestAnimationFrame(() => input.current?.focus()); };
 
   async function ask(content: string) {
     content = content.trim();
@@ -128,6 +133,13 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
       <span className="truncate text-sm">{title}</span><span className="text-xs text-muted">{detail}</span>
     </button>
   </li>;
+  const expandButton = expandable && (expanded
+    ? <IconButton size="sm" label="Shrink chat" onClick={toggleExpanded}><Minimize2 size={16} /></IconButton>
+    : <IconButton size="sm" className="max-lg:hidden" label="Enlarge chat" onClick={toggleExpanded}><Maximize2 size={16} /></IconButton>);
+  // The chat's card, beside other content or enlarged in a modal.
+  const frame = (children: ReactNode) => expanded
+    ? <Modal bare title="Chat" label={name || "Chat"} onClose={toggleExpanded}><Card className="flex min-h-0 flex-1 flex-col max-sm:rounded-none max-sm:border-0">{children}</Card></Modal>
+    : <Card className={cn("flex min-h-80 flex-col", className)}>{children}</Card>;
   const newChatButton = newChat && <IconButton size="sm" label="Start a new chat" onClick={newChat} disabled={!!busy || !messages.length}><MessageSquarePlus size={16} /></IconButton>;
 
   const render = (message: ChatMessage, i: number) => message.role === "summary"
@@ -137,11 +149,12 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
       {message.diagram && <Diagram diagram={message.diagram} />}
     </div>;
 
-  if (past) return <Card className={cn("flex min-h-80 flex-col", className)}>
+  if (past) return frame(<>
     <div className="flex items-center gap-1 border-b border-line p-1">
       <IconButton size="sm" label="Back to the chat" onClick={() => { setBarError(""); setPast(null); }}><ArrowLeft size={16} /></IconButton>
       <span className="flex-1 px-2 text-sm">Chats</span>
       {newChatButton}
+      {expandButton}
     </div>
     {barFailure}
     <div ref={log} className="flex flex-1 flex-col gap-3 overflow-auto p-4">
@@ -152,14 +165,15 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
           {past.map((chat) => chatRow(chat.clearedAt, chat.name || opening(chat.messages), `${when(chat.lastAt)} · ${chat.messages.length} messages`, () => switchTo(chat)))}
         </ul>}
     </div>
-  </Card>;
+  </>);
 
-  return <Card className={cn("flex min-h-80 flex-col", className)}>
-    {(history || clear) && <div className="flex items-center gap-1 border-b border-line p-1">
+  return frame(<>
+    {history || clear ? <div className="flex items-center gap-1 border-b border-line p-1">
       <ChatName name={name} fallback={opening(messages) || "New chat"} rename={messages.length ? renameTo : undefined} />
       {history && <IconButton size="sm" label="Chats" onClick={showHistory} disabled={!!busy}><History size={16} /></IconButton>}
       {newChatButton}
-    </div>}
+      {expandButton}
+    </div> : expandButton && <div className={cn("flex justify-end border-b border-line p-1", !expanded && "max-lg:hidden")}>{expandButton}</div>}
     {barFailure}
     <div ref={log} className="flex flex-1 flex-col gap-3 overflow-auto p-4">
       {!messages.length && !busy && <p className="text-sm text-muted">{empty}</p>}
@@ -169,16 +183,17 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     {summarize && leftOut && !busy && <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-1 text-xs text-muted">
       <span>Older messages no longer reach the tutor.</span><Button variant="ghost" size="sm" onClick={summarizeChat}>Summarize</Button>
     </div>}
+    {hasMath(text) && <MathPreview className="m-3 max-h-40 overflow-auto" text={text} />}
     <form className="flex items-end gap-2 border-t border-line p-3" onSubmit={(event) => { event.preventDefault(); void ask(text); }}>
       {/* py-1.75 with a 24px line makes one line exactly h-control, so the buttons line up with it. */}
-      <Textarea ref={input} rows={1} aria-label="Message the tutor" className="max-h-40 resize-none py-1.75 text-sm leading-6" value={text} onChange={(event) => setText(event.target.value)}
+      <Textarea ref={input} rows={1} mathPreview={false} aria-label="Message the tutor" className="max-h-40 resize-none py-1.75 text-sm leading-6" value={text} onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(text); } }} placeholder={placeholder} />
       {hint && <IconButton label="Get a hint" onClick={() => void ask(hint)} disabled={!!busy}><Lightbulb size={18} /></IconButton>}
       {summarize && unsummarized.length >= 2 && <IconButton label="Summarize chat" onClick={summarizeChat} disabled={!!busy}><ListCollapse size={18} /></IconButton>}
       {stopper ? <IconButton label="Stop" className="text-accent" onClick={() => stopper.abort()}><Square size={16} fill="currentColor" /></IconButton>
         : <IconButton type="submit" label="Send message" className="text-accent" disabled={!text.trim() || !!busy}><Send size={18} /></IconButton>}
     </form>
-  </Card>;
+  </>);
 }
 
 // A chat's name in its top bar. The pencil turns it into a field; Enter or leaving the field saves, and Escape cancels.
@@ -205,7 +220,7 @@ function ChatName({ name, fallback, rename }: { name: string; fallback: string; 
 const savedChatHeight = "h-[min(36rem,calc(100dvh-240px))]";
 
 // A saved chat about a subject, topic, folder, or resource: `path` is its chat endpoint. Remount it with a new `key` for each item.
-export function SavedChat({ path, name, empty = "Ask a question, request an example, or ask to be quizzed. Answers draw on your course material.", className }: { path: string; name: string; empty?: string; className?: string }) {
+export function SavedChat({ path, name, empty = "Ask a question, request an example, or ask to be quizzed. Answers draw on your course material.", expandable, className }: { path: string; name: string; empty?: string; expandable?: boolean; className?: string }) {
   const ai = useAISettings();
   const [chat, setChat] = useState<{ messages: ChatMessage[]; name: string } | null>(null);
   const [error, setError] = useState("");
@@ -232,5 +247,5 @@ export function SavedChat({ path, name, empty = "Ask a question, request an exam
     history={async () => (await api<{ chats: PastChat[] }>(`${path}?archived=1`)).chats}
     resume={(clearedAt) => api<void>(`${path}?restore=${encodeURIComponent(clearedAt)}`, { method: "DELETE" })}
     rename={async (name) => { await api(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }}
-    placeholder={`Ask about ${name}…`} empty={empty} />;
+    placeholder={`Ask about ${name}…`} empty={empty} expandable={expandable} />;
 }

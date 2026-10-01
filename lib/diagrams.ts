@@ -20,6 +20,29 @@ export function cleanDiagram(value: unknown): Diagram | null {
   return { kind, source: text, alt: description };
 }
 
+// Quotes a flowchart's node and edge labels, so text such as G(x) inside A[…] is not read as another shape.
+// Models often leave labels unquoted; the browser tries this when a flowchart does not parse as written.
+// Labels that open a special shape, such as A[(database)], are left alone.
+export function quoteMermaidLabels(source: string) {
+  if (!/^\s*(flowchart|graph)\b/i.test(source)) return source;
+  return source
+    .replace(/(\w)\[(?![[(/\\])([^\]\n"]+)\]/g, '$1["$2"]')
+    .replace(/(\w)\{(?!\{)([^}\n"]+)\}/g, '$1{"$2"}')
+    .replace(/\|([^|\n"]+)\|/g, '|"$1"|');
+}
+
+// Mermaid typesets $$…$$ in labels with KaTeX but drops the spaces beside each formula, so "Run $$D_H$$ on" would read
+// "RunD_Hon". Each space next to a formula is repeated inside it as a TeX space.
+export function spaceMermaidMath(source: string) {
+  return source.replace(/( ?)\$\$([^$\n]+?)\$\$( ?)/g, (_match, before: string, tex: string, after: string) =>
+    `${before}$$${before && "\\ "}${tex}${after && "\\ "}$$${after}`);
+}
+
+// The figure's description without TeX delimiters, for screen readers, which would otherwise read them aloud.
+export function plainAlt(alt: string) {
+  return alt.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$([^$\n]+?)\$/g, (_match, ...tex: (string | undefined)[]) => tex.find((part) => part !== undefined) ?? "");
+}
+
 // The figure's description, appended to text sent to the tutor, which cannot see the drawing.
 export function withFigure(text: string, diagram: Diagram | null | undefined, label = "Figure") {
   return diagram ? `${text}\n[${label}: ${diagram.alt}]` : text;
@@ -44,7 +67,7 @@ export function themedSvgUrl(source: string, colors: Record<string, string>) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-const DIAGRAM_RULES = `Use kind mermaid for structure: flowcharts, cycles, sequences, state machines, timelines, mind maps, trees, class or entity diagrams, and simple pie charts. Write valid Mermaid with no init directives, styling, click handlers, or HTML, and write any math in labels as plain Unicode such as θ, x², or ≤. Use kind svg for drawings where position matters: geometry, force diagrams, circuits, graphs of specific points, and labelled sketches. Write one self-contained <svg> element with a viewBox, at most 20,000 characters, with no scripts, images, links, fonts, or external references; label with <text> using plain Unicode math. Work out the geometry before writing coordinates: derive every point from it so objects rest on the surfaces they touch, angles match their labels, and each arrow points in the direction the text states, such as along or perpendicular to a slope. For SVG colors use only ${DIAGRAM_COLORS.join(", ")}, or none, as fill and stroke values; they follow the reader's light or dark theme. Never rely on color alone. alt describes in one to three sentences everything a student needs from the figure, because the tutor only sees alt.`;
+const DIAGRAM_RULES = `Use kind mermaid for structure: flowcharts, cycles, sequences, state machines, timelines, mind maps, trees, class or entity diagrams, and simple pie charts. Write valid Mermaid with no init directives, styling, click handlers, or HTML; put every flowchart node and edge label in double quotes, such as A["H(x) = 1"]; and write math in flowchart labels as TeX between $$ and $$ inside the quoted label, such as A["Run $$D_H$$ on $$r \\circ z$$"]; in other Mermaid diagrams write math as plain Unicode such as θ, x², or ≤. Use kind svg for drawings where position matters: geometry, force diagrams, circuits, graphs of specific points, and labelled sketches. Write one self-contained <svg> element with a viewBox, at most 20,000 characters, with no scripts, images, links, fonts, or external references; label with <text> using plain Unicode math. Work out the geometry before writing coordinates: derive every point from it so objects rest on the surfaces they touch, angles match their labels, and each arrow points in the direction the text states, such as along or perpendicular to a slope. For SVG colors use only ${DIAGRAM_COLORS.join(", ")}, or none, as fill and stroke values; they follow the reader's light or dark theme. Never rely on color alone. alt describes in one to three sentences everything a student needs from the figure, because the tutor only sees alt; write math in it as \\(…\\), as in the rest of the text.`;
 
 // Instructions for a chat reply's optional figure. Chats may always draw, but only when asked or when a figure clearly helps.
 export function chatDiagramInstructions(secret = "") {

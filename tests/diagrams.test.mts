@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanDiagram, themedSvgUrl, withFigure } from "../lib/diagrams.ts";
+import { cleanDiagram, plainAlt, quoteMermaidLabels, spaceMermaidMath, themedSvgUrl, withFigure } from "../lib/diagrams.ts";
 
 test("keeps a valid diagram and trims its description", () => {
   assert.deepEqual(cleanDiagram({ kind: "mermaid", source: " graph TD; A-->B ", alt: " A leads\n to B. " }), { kind: "mermaid", source: "graph TD; A-->B", alt: "A leads to B." });
@@ -32,4 +32,18 @@ test("maps SVG color names to theme colors and keeps others", () => {
 test("describes the figure to the tutor", () => {
   assert.equal(withFigure("Find x.", { kind: "svg", source: "<svg></svg>", alt: "A right triangle with legs 3 and 4." }), "Find x.\n[Figure: A right triangle with legs 3 and 4.]");
   assert.equal(withFigure("Find x.", null), "Find x.");
+});
+
+test("quotes flowchart labels so parentheses are read as text", () => {
+  assert.equal(quoteMermaidLabels("flowchart LR\n  A[Challenge G(x)] -->|if z = G(x)| B{Is H(rx) uniform?}\n  B --> C[\"Done\"]\n  C --> D[(Store)]"),
+    "flowchart LR\n  A[\"Challenge G(x)\"] -->|\"if z = G(x)\"| B{\"Is H(rx) uniform?\"}\n  B --> C[\"Done\"]\n  C --> D[(Store)]");
+  assert.equal(quoteMermaidLabels("sequenceDiagram\n  A->>B: f(x)"), "sequenceDiagram\n  A->>B: f(x)");
+});
+
+test("keeps the spaces beside formulas in Mermaid labels", () => {
+  assert.equal(spaceMermaidMath('A["Run $$D_H$$ on $$r \\circ z$$"] -->|"$$z = G(x)$$"| B'), 'A["Run $$\\ D_H\\ $$ on $$\\ r \\circ z$$"] -->|"$$z = G(x)$$"| B');
+});
+
+test("reads a description's math without TeX delimiters", () => {
+  assert.equal(plainAlt("\\(D_G\\) calls \\(D_H\\) on $r$; then $$z = G(x)$$ or \\[z \\gets U\\]."), "D_G calls D_H on r; then z = G(x) or z \\gets U.");
 });
