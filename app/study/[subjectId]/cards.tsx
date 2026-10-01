@@ -92,6 +92,12 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
     return aiApi<{ reply: string; diagram: DiagramData | null }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, revealed }), signal })
       .then((result) => ({ text: result.reply, diagram: result.diagram }));
   }
+  async function summarizeChat(signal: AbortSignal) {
+    if (!card) throw new Error("No card is open.");
+    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to summarize."); }
+    return (await aiApi<{ summary: string }>(`/api/cards/${card.id}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summarize: true }), signal })).summary;
+  }
+
 
   function removeCard(id: string) {
     setDialog(null);
@@ -149,7 +155,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
               </Button>)}
             </div>}
         </div>
-        <Chat key={card.id} draftKey={`chat:card:${card.id}`} expandable className="max-split:h-[min(32rem,75dvh)] split:sticky split:top-6 split:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={card.messages} send={askTutor} placeholder={revealed ? "Ask about this card…" : "Ask without seeing the answer…"} empty="Ask the tutor about this card, or use the lightbulb for a hint that keeps the answer hidden." />
+        <Chat key={card.id} draftKey={`chat:card:${card.id}`} expandable className="max-split:h-[min(32rem,75dvh)] split:sticky split:top-6 split:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={card.messages} send={askTutor} summarize={summarizeChat} clear={() => api<void>(`/api/cards/${card.id}/chat`, { method: "DELETE" })} placeholder={revealed ? "Ask about this card…" : "Ask without seeing the answer…"} empty="Ask the tutor about this card, or use the lightbulb for a hint that keeps the answer hidden." />
       </div>}
     {dialog?.kind === "add" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
     {dialog?.kind === "edit" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} card={dialog.card} topicId={dialog.card.topicId} onClose={closeDialog} onDelete={removeCard} />}

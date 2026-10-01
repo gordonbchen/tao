@@ -195,9 +195,10 @@ async function chatReply(system: string, input: object, limit: number, options: 
   return { text: value.reply.slice(0, limit), diagram: cleanDiagram(value.diagram), title };
 }
 
-export async function suggestHint(problem: { prompt: string; solution: string }, studentMessage: string, previousHints: string[], options: AiOptions = {}) {
+// `earlierSummary` stands in for the chat before `previousHints`.
+export async function suggestHint(problem: { prompt: string; solution: string }, studentMessage: string, previousHints: string[], earlierSummary: string | undefined, options: AiOptions = {}) {
   return chatReply(`Act as a patient tutor. Give one small, incremental hint that responds to where the student is stuck. Do not reveal the answer or full solution. ${CHAT_REPLY} ${NO_TITLE} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions("The figure must not reveal the answer or the solution's key step.")}`,
-    { problem: problem.prompt, solution: problem.solution, earlierHints: previousHints, studentMessage }, 1200, options);
+    { problem: problem.prompt, solution: problem.solution, earlierSummary, earlierHints: previousHints, studentMessage }, 1200, options);
 }
 
 export const CARD_DENSITIES = ["brief", "standard", "detailed"] as const;
@@ -247,11 +248,12 @@ export async function generateCards(context: { subject: string; topic: string; c
 }
 
 // One tutor reply about a flashcard. Before the student reveals the back, the tutor hints without giving it away.
-export async function tutorCard(card: { front: string; back: string }, revealed: boolean, studentMessage: string, previous: string[], options: AiOptions = {}) {
+// `earlierSummary` stands in for the chat before `previous`.
+export async function tutorCard(card: { front: string; back: string }, revealed: boolean, studentMessage: string, previous: string[], earlierSummary: string | undefined, options: AiOptions = {}) {
   return chatReply(`Act as a patient tutor helping a student with one flashcard. ${revealed
       ? "The student has seen the answer. Explain, give intuition or an example, or answer their question about it."
       : "The student has not seen the answer yet. Give a small hint or respond to their question without revealing the answer on the back."} Keep replies short. ${CHAT_REPLY} ${NO_TITLE} ${PLAIN_MATH_TEXT} ${chatDiagramInstructions(revealed ? "" : "The figure must not show or label the answer on the back.")}`,
-    { front: card.front, back: card.back, earlierReplies: previous, studentMessage }, 2000, options);
+    { front: card.front, back: card.back, earlierSummary, earlierReplies: previous, studentMessage }, 2000, options);
 }
 
 // One reply in an open conversation about a topic, folder, or resource, grounded in the supplied material.
@@ -261,7 +263,7 @@ export async function chatAbout(material: object, earlierSummary: string | undef
     { material, earlierSummary, conversation, studentMessage }, 4000, options);
 }
 
-// Condenses a study chat so it can continue from the summary instead of the full history.
+// Condenses a chat so it can continue from the summary instead of the full history.
 export async function summarizeChat(earlierSummary: string | undefined, conversation: { role: string; text: string }[], options: AiOptions = {}) {
   const { value } = await jsonFromConfiguredProvider<{ hint: string }>(
     `Summarize a conversation between a student and a tutor so the tutor can continue it from the summary alone. Include an earlier summary if one is given. Keep what the student asked, what was explained and any examples or quiz questions, what the student understood or got wrong, and anything left open. Use at most 250 words. Return JSON with a single hint string containing the summary. ${PLAIN_MATH_TEXT}`,

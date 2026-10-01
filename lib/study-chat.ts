@@ -1,4 +1,4 @@
-import { aiOptionsFromRequest, chatAbout, hasAiProvider, summarizeChat } from "@/lib/ai";
+import { aiOptionsFromRequest, chatAbout, hasAiProvider, summarizeChat, type AiOptions } from "@/lib/ai";
 import { isUuid, jsonError, LOCAL_OWNER_ID, query } from "@/lib/db";
 import { withFigure, type Diagram } from "@/lib/diagrams";
 import { recentMessages, relevantPassages, sinceSummary } from "@/lib/chat-context";
@@ -96,6 +96,31 @@ export async function renameStudyChat(target: ChatTarget, id: string, request: R
   return Response.json({ name });
 }
 
+type Parent = (typeof parents)[ChatTarget] | "problem_id" | "card_id";
+
+// The current chat's latest summary and the messages after it, with earlier figures as their descriptions, which is how the tutor reads them.
+export async function currentChat(parent: Parent, id: string) {
+  return sinceSummary((await chatMessages(parent, id)).map((item) => ({ role: item.role, text: withFigure(item.text, item.diagram) })));
+}
+
+// Stores a summary of the current chat that stands in for everything before it. The caller checks ownership.
+export async function summarizeStoredChat(parent: Parent, id: string, options: AiOptions) {
+  const { summary, messages } = await currentChat(parent, id);
+  if (messages.length < 2) return jsonError("There is nothing new to summarize yet.", 422);
+  let text: string | undefined;
+  try { text = await summarizeChat(summary, recentMessages(messages, 200, 60_000), options); }
+  catch { return jsonError("The chat could not be summarized. Check the configured AI provider or try again.", 502); }
+  if (!text) return jsonError("The chat could not be summarized. Try again.", 502);
+  await query(`INSERT INTO tutor_messages(${parent}, role, kind, content) VALUES ($1, 'tutor', 'summary', $2)`, [id, text]);
+  return Response.json({ summary: text });
+}
+
+// Sets the current chat aside, leaving a problem's answer checks alone. The caller checks ownership.
+export async function clearStoredChat(parent: Parent, id: string) {
+  await query(`UPDATE tutor_messages SET cleared_at = now() WHERE ${parent} = $1 AND cleared_at IS NULL AND kind <> 'answer_check'`, [id]);
+  return new Response(null, { status: 204 });
+}
+
 // Posts a message and returns the tutor's reply, or with `summarize: true` summarizes the chat so far.
 export async function postStudyChat(target: ChatTarget, id: string, request: Request) {
   if (!isUuid(id)) return jsonError(notFound[target], 404);
@@ -105,20 +130,9 @@ export async function postStudyChat(target: ChatTarget, id: string, request: Req
   if (body.summarize !== true && (!message || message.length > 2000)) return jsonError("Message must be 1–2,000 characters");
   if (!hasAiProvider()) return jsonError("Sign in to an AI account before chatting", 409);
   if (!await owned(target, id)) return jsonError(notFound[target], 404);
-  // The tutor reads its earlier figures as their descriptions.
-  const { summary, messages } = sinceSummary((await chatMessages(parents[target], id)).map((item) => ({ role: item.role, text: withFigure(item.text, item.diagram) })));
   const options = aiOptionsFromRequest(request);
-
-  if (body.summarize === true) {
-    if (messages.length < 2) return jsonError("There is nothing new to summarize yet.", 422);
-    let text: string | undefined;
-    try { text = await summarizeChat(summary, recentMessages(messages, 200, 60_000), options); }
-    catch { return jsonError("The chat could not be summarized. Check the configured AI provider or try again.", 502); }
-    if (!text) return jsonError("The chat could not be summarized. Try again.", 502);
-    await query(`INSERT INTO tutor_messages(${parents[target]}, role, kind, content) VALUES ($1, 'tutor', 'summary', $2)`, [id, text]);
-    return Response.json({ summary: text });
-  }
-
+  if (body.summarize === true) return summarizeStoredChat(parents[target], id, options);
+  const { summary, messages } = await currentChat(parents[target], id);
   const conversation = recentMessages(messages);
   const context = await material(target, id, [...conversation.filter((item) => item.role === "user").map((item) => item.text), message].join(" "));
   if (!context) return jsonError(notFound[target], 404);
@@ -139,10 +153,7 @@ export async function clearStudyChat(target: ChatTarget, id: string, request: Re
   const restore = new URL(request.url).searchParams.get("restore");
   if (restore !== null && !isTimestamp(restore)) return jsonError("Chat not found", 404);
   if (!await owned(target, id)) return jsonError(notFound[target], 404);
-  if (restore === null) {
-    await query(`UPDATE tutor_messages SET cleared_at = now() WHERE ${parents[target]} = $1 AND cleared_at IS NULL`, [id]);
-    return new Response(null, { status: 204 });
-  }
+  if (restore === null) return clearStoredChat(parents[target], id);
   const exists = await query(`SELECT 1 FROM tutor_messages WHERE ${parents[target]} = $1 AND cleared_at = $2::timestamptz AND kind IN ('question', 'hint') LIMIT 1`, [id, restore]);
   if (!exists.rowCount) return jsonError("Chat not found", 404);
   // One statement, so the two chats swap together.

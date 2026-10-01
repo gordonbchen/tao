@@ -147,6 +147,12 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     const result = await aiApi<{ hint: string; diagram: DiagramData | null }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }), signal });
     return { text: result.hint, diagram: result.diagram };
   }
+  async function summarizeChat(signal: AbortSignal) {
+    if (!problem) throw new Error("No problem is open.");
+    if (!ai.configured) { notifyAiSetupRequired(); throw new Error("Sign in to an AI account to summarize."); }
+    return (await aiApi<{ summary: string }>(`/api/problems/${problem.id}/hints`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summarize: true }), signal })).summary;
+  }
+
 
   async function submitAttempt(e: React.FormEvent) {
     e.preventDefault(); if (!problem || !answer.trim()) return;
@@ -275,6 +281,6 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         </div>
       </section>}
     </div>
-    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} expandable className="max-split:h-[min(32rem,75dvh)] split:sticky split:top-6 split:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
+    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} expandable className="max-split:h-[min(32rem,75dvh)] split:sticky split:top-6 split:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} summarize={summarizeChat} clear={() => api<void>(`/api/problems/${problem.id}/hints`, { method: "DELETE" })} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
   </div>{dialogs}</>;
 }

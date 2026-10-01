@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, History, Lightbulb, ListCollapse, Maximize2, MessageSquarePlus, Minimize2, Pencil, Send, Square } from "lucide-react";
+import { ArrowLeft, Eraser, History, Lightbulb, ListCollapse, Maximize2, MessageSquarePlus, Minimize2, Pencil, Send, Square } from "lucide-react";
 import { recentMessages, sinceSummary } from "@/lib/chat-context";
 import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "./components";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
@@ -21,7 +21,8 @@ const when = (date: string) => new Date(date).toLocaleString(undefined, { dateSt
 
 // Tutor conversation for problems, flashcards, topics, folders, and resources. Remount it with a new `key` for each item.
 // `send` returns the tutor's reply; its signal aborts when the student presses Stop. Enter sends; Shift+Enter starts a new line. `hint` adds a lightbulb that sends
-// that message, `summarize` adds a button that condenses the conversation so far, and `clear` one that starts a new chat.
+// that message, `summarize` adds a button that condenses the conversation so far, and `clear` one that starts a new chat
+// (with `history`) or clears this one.
 // `history` adds a list of all chats; `resume` switches to an earlier one, setting the current chat aside. `rename` makes
 // the chat's name editable. `draftKey` keeps the unsent message in this browser as it is typed. `expandable` adds a button,
 // on wide screens, that enlarges the chat to a modal; use it where the chat sits beside other content.
@@ -111,7 +112,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   const showHistory = () => {
     if (history) void act(async () => { setPast(await history()); }, "Loading chats…", "Chats could not be loaded.");
   };
-  const newChat = clear && (() => void act(async () => { await clear(); setMessages([]); setName(""); setBarError(""); setPast(null); }, "Starting a new chat…", "A new chat could not be started."));
+  const newChat = clear && (() => void act(async () => { await clear(); setMessages([]); setName(""); setBarError(""); setPast(null); }, history ? "Starting a new chat…" : "Clearing the chat…", history ? "A new chat could not be started." : "The chat could not be cleared."));
   // Opens an earlier chat in place of the current one, which joins the list.
   const switchTo = (chat: PastChat) => {
     if (!resume || busy) return;
@@ -141,7 +142,8 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   const frame = (children: ReactNode) => expanded
     ? <Modal bare title="Chat" label={name || "Chat"} onClose={toggleExpanded}><Card className="flex min-h-0 flex-1 flex-col max-sm:rounded-none max-sm:border-0">{children}</Card></Modal>
     : <Card className={cn("flex min-h-80 flex-col", className)}>{children}</Card>;
-  const newChatButton = newChat && <IconButton size="sm" label="Start a new chat" onClick={newChat} disabled={!!busy || !messages.length}><MessageSquarePlus size={16} /></IconButton>;
+  const newChatButton = newChat && <IconButton size="sm" label={history ? "Start a new chat" : "Clear chat"} onClick={newChat} disabled={!!busy || !messages.length}>
+    {history ? <MessageSquarePlus size={16} /> : <Eraser size={16} />}</IconButton>;
 
   const render = (message: ChatMessage, i: number) => message.role === "summary"
     ? <div key={i} className="border-y border-line py-3 text-sm"><p className="mb-1 text-xs text-muted">Summary of the conversation above; the tutor now reads this instead</p><MathText className="leading-relaxed whitespace-pre-wrap" text={message.text} /></div>
@@ -170,7 +172,8 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
 
   return frame(<>
     {history || clear ? <div className="flex items-center gap-1 border-b border-line p-1">
-      <ChatName name={name} fallback={opening(messages) || "New chat"} rename={messages.length ? renameTo : undefined} />
+      {/* Chats without a history have no name. */}
+      {history ? <ChatName name={name} fallback={opening(messages) || "New chat"} rename={messages.length ? renameTo : undefined} /> : <span className="flex-1" />}
       {history && <IconButton size="sm" label="Chats" onClick={showHistory} disabled={!!busy}><History size={16} /></IconButton>}
       {newChatButton}
       {expandButton}
@@ -187,19 +190,21 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     {/* The unsent message with its math typeset: the shape of the student's message it will become, but an outline
         with muted text, where sent messages are filled. */}
     {hasMath(text) && <div className="flex flex-col px-4 pb-3"><MathText className={cn(bubble, "block max-h-40 self-end overflow-auto border border-dashed border-line-strong leading-relaxed whitespace-pre-wrap text-muted")} text={text} /></div>}
-    <form className="flex items-end gap-2 border-t border-line p-3" onSubmit={(event) => { event.preventDefault(); void ask(text); }}>
-      {/* py-1.75 with a 24px line makes one line exactly h-control, so the buttons line up with it. */}
+    <form className="flex flex-col gap-2 border-t border-line p-3" onSubmit={(event) => { event.preventDefault(); void ask(text); }}>
+      {/* py-1.75 with a 24px line makes one line exactly h-control. */}
       {/* Browsers ignore text-overflow on a textarea's placeholder, so a long one, such as a filename, is drawn over the
           empty box on one line with an ellipsis instead of wrapping and growing it. */}
-      <div className="relative min-w-0 flex-1">
+      <div className="relative">
         <Textarea ref={input} rows={1} mathPreview={false} aria-label="Message the tutor" aria-placeholder={placeholder} className="max-h-40 resize-none py-1.75 text-sm leading-6" value={text} onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(text); } }} />
         {!text && <span aria-hidden className="pointer-events-none absolute inset-x-px top-px truncate px-3 py-1.75 text-sm leading-6 text-muted">{placeholder}</span>}
       </div>
-      {hint && <IconButton label="Get a hint" onClick={() => void ask(hint)} disabled={!!busy}><Lightbulb size={18} /></IconButton>}
-      {summarize && unsummarized.length >= 2 && <IconButton label="Summarize chat" onClick={summarizeChat} disabled={!!busy}><ListCollapse size={18} /></IconButton>}
-      {stopper ? <IconButton label="Stop" className="text-accent" onClick={() => stopper.abort()}><Square size={16} fill="currentColor" /></IconButton>
-        : <IconButton type="submit" label="Send message" className="text-accent" disabled={!text.trim() || !!busy}><Send size={18} /></IconButton>}
+      <div className="flex items-center justify-end gap-2">
+        {hint && <IconButton label="Get a hint" onClick={() => void ask(hint)} disabled={!!busy}><Lightbulb size={18} /></IconButton>}
+        {summarize && unsummarized.length >= 2 && <IconButton label="Summarize chat" onClick={summarizeChat} disabled={!!busy}><ListCollapse size={18} /></IconButton>}
+        {stopper ? <IconButton label="Stop" className="text-accent" onClick={() => stopper.abort()}><Square size={16} fill="currentColor" /></IconButton>
+          : <IconButton type="submit" label="Send message" className="text-accent" disabled={!text.trim() || !!busy}><Send size={18} /></IconButton>}
+      </div>
     </form>
   </>);
 }
