@@ -136,7 +136,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
   </li>;
   const expandButton = expandable && (expanded
     ? <IconButton size="sm" label="Shrink chat" onClick={toggleExpanded}><Minimize2 size={16} /></IconButton>
-    : <IconButton size="sm" className="max-lg:hidden" label="Enlarge chat" onClick={toggleExpanded}><Maximize2 size={16} /></IconButton>);
+    : <IconButton size="sm" className="max-split:hidden" label="Enlarge chat" onClick={toggleExpanded}><Maximize2 size={16} /></IconButton>);
   // The chat's card, beside other content or enlarged in a modal.
   const frame = (children: ReactNode) => expanded
     ? <Modal bare title="Chat" label={name || "Chat"} onClose={toggleExpanded}><Card className="flex min-h-0 flex-1 flex-col max-sm:rounded-none max-sm:border-0">{children}</Card></Modal>
@@ -174,7 +174,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
       {history && <IconButton size="sm" label="Chats" onClick={showHistory} disabled={!!busy}><History size={16} /></IconButton>}
       {newChatButton}
       {expandButton}
-    </div> : expandButton && <div className={cn("flex justify-end border-b border-line p-1", !expanded && "max-lg:hidden")}>{expandButton}</div>}
+    </div> : expandButton && <div className={cn("flex justify-end border-b border-line p-1", !expanded && "max-split:hidden")}>{expandButton}</div>}
     {barFailure}
     <div ref={log} className="flex flex-1 flex-col gap-3 overflow-auto p-4">
       {!messages.length && !busy && <p className="text-sm text-muted">{empty}</p>}

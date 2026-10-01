@@ -232,7 +232,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
   const FeedbackIcon = feedback?.correctness === "correct" ? CheckCircle2 : feedback?.correctness === "incorrect" ? TriangleAlert : feedback?.correctness === "uncertain" ? CircleHelp : ThumbsUp;
   const feedbackTone = feedback?.correctness === "correct" ? "border-success-line bg-success-soft" : feedback?.correctness === "incorrect" ? "border-danger-line bg-danger-soft" : "border-warning-line bg-warning-soft";
 
-  return <>{toolbar}<div className="grid grid-cols-[minmax(0,1fr)_minmax(280px,360px)] items-start gap-6 max-lg:grid-cols-1">
+  return <>{toolbar}<div className="grid grid-cols-[minmax(0,1fr)_minmax(280px,360px)] items-start gap-6 max-split:grid-cols-1">
     <div className="flex min-w-0 flex-col gap-4">
       <Card className="p-6 max-sm:p-4">
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -275,6 +275,6 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
         </div>
       </section>}
     </div>
-    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} expandable className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
+    <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} expandable className="max-split:h-[min(32rem,75dvh)] split:sticky split:top-6 split:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
   </div>{dialogs}</>;
 }

@@ -128,7 +128,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
       : !card ? <p className="py-8 text-muted">{!counts?.total
         ? "No cards yet. Add your own, import a deck, or generate cards from a topic."
         : `No cards are due${counts.nextDue ? `. The next one is due ${when(counts.nextDue)}.` : "."}`}</p>
-      : <div className="grid grid-cols-[minmax(0,1fr)_minmax(280px,360px)] items-start gap-6 max-lg:grid-cols-1">
+      : <div className="grid grid-cols-[minmax(0,1fr)_minmax(280px,360px)] items-start gap-6 max-split:grid-cols-1">
         <div className="flex min-w-0 flex-col gap-4">
           <Card className="p-6 max-sm:p-4">
             <div className="mb-4 flex items-center gap-2">
@@ -149,7 +149,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
               </Button>)}
             </div>}
         </div>
-        <Chat key={card.id} draftKey={`chat:card:${card.id}`} expandable className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={card.messages} send={askTutor} placeholder={revealed ? "Ask about this card…" : "Ask without seeing the answer…"} empty="Ask the tutor about this card, or use the lightbulb for a hint that keeps the answer hidden." />
+        <Chat key={card.id} draftKey={`chat:card:${card.id}`} expandable className="max-split:h-[min(32rem,75dvh)] split:sticky split:top-6 split:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={card.messages} send={askTutor} placeholder={revealed ? "Ask about this card…" : "Ask without seeing the answer…"} empty="Ask the tutor about this card, or use the lightbulb for a hint that keeps the answer hidden." />
       </div>}
     {dialog?.kind === "add" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
     {dialog?.kind === "edit" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} card={dialog.card} topicId={dialog.card.topicId} onClose={closeDialog} onDelete={removeCard} />}

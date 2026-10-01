@@ -121,8 +121,8 @@ function SubjectContent() {
   const [subjectChatOpen, toggleSubjectChat] = useStoredToggle("tao-subject-chat", false);
   const chatToggle = <ChatToggle open={chatOpen} onToggle={toggleChat} />;
   useEffect(() => { document.documentElement.dataset.subjectChat = String(subjectChatOpen); }, [subjectChatOpen]);
-  // A viewer's chat has its own tab; wide screens can also show it beside the summary.
-  const wide = useMediaQuery("(min-width: 64rem)");
+  // A viewer's chat has its own tab; screens from the split breakpoint can also show it beside the summary.
+  const wide = useMediaQuery("(min-width: 56rem)");
   const viewerChat = (path: string, id: string, name: string, beside = false) => <SavedChat key={id} path={path} name={name} expandable={beside}
     className={beside ? splitChat : "h-dvh min-h-80 w-full"} />;
   // Starts a request that `stopRequest(key)` can abort; `finished` forgets it.
@@ -734,7 +734,7 @@ function SubjectContent() {
   // widen once it hydrates or the subject loads.
   return <Page className="in-data-[subject-chat=true]:max-w-7xl">
     <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink"><ArrowLeft size={18} />Subjects</Link>
-    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid grid-cols-[minmax(0,1fr)] gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr]")}>
+    {loading ? <LoadingCard /> : !subject ? <p>{error || "Subject not found."}</p> : <div className={cn(subjectChat && "grid grid-cols-[minmax(0,1fr)] gap-x-12 split:grid-cols-[minmax(0,1fr)_min(28rem,45%)] split:grid-rows-[auto_1fr]")}>
       <div>
         <div className="mb-10 flex flex-wrap items-center justify-between gap-4">{renaming
           ? <form className="flex min-w-0 flex-1 items-center gap-2" onSubmit={(event) => { event.preventDefault(); renameSubject(new FormData(event.currentTarget).get("name")?.toString().trim() ?? ""); }}
@@ -754,8 +754,8 @@ function SubjectContent() {
       </div>
 
       {/* Above topics and resources on narrow screens; beside them, and in view while the page scrolls, on wide ones. */}
-      {subjectChat && <div className="self-start max-lg:mb-12 max-lg:w-full lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} expandable className="max-lg:h-[calc(100dvh-18rem)] lg:h-[min(40rem,calc(100dvh-14rem))]"
+      {subjectChat && <div className="self-start max-split:mb-12 max-split:w-full split:sticky split:top-6 split:col-start-2 split:row-span-2 split:row-start-1">
+        <SavedChat key={subject.id} path={`/api/subjects/${subject.id}/chat`} name={subject.name} expandable className="max-split:h-[calc(100dvh-18rem)] split:h-[min(40rem,calc(100dvh-14rem))]"
           empty="Ask about your progress, weakest topics, or what to study next, or about the course material." />
       </div>}
 
@@ -928,9 +928,9 @@ const topicTabs = ["summary", "resources"] as const;
 // while the summary scrolls the modal.
 function WithChat({ open, chat, children }: { open: boolean; chat: ReactNode; children: ReactNode }) {
   if (!open) return children;
-  return <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:items-start">
+  return <div className="grid gap-6 split:grid-cols-[minmax(0,1fr)_min(28rem,45%)] split:items-start">
     <div className="min-w-0">{children}</div>
-    <div className="lg:sticky lg:top-0">{chat}</div>
+    <div className="split:sticky split:top-0">{chat}</div>
   </div>;
 }
 
@@ -968,7 +968,7 @@ function ChatToggle({ open, onToggle }: { open: boolean; onToggle: () => void })
 }
 
 // Tall enough to fill the modal below its title and tabs.
-const splitChat = "lg:h-[calc(100dvh-14rem)]";
+const splitChat = "split:h-[calc(100dvh-14rem)]";
 
 // Returns the item `step` places from `current`, wrapping around; `current` itself if it is not in the list.
 function cycle<T>(items: readonly T[], current: T, step: number) {

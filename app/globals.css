@@ -92,6 +92,9 @@
   --font-serif: "Libertinus Serif", "Computer Modern", "Latin Modern Roman", "STIX Two Text", Georgia, serif;
   --font-mono: ui-monospace, SFMono-Regular, monospace;
 
+  /* From here up a chat sits beside what it is about (a summary, a problem, a card, the subject page) instead of below it. */
+  --breakpoint-split: 56rem;
+
   --text-*: initial;
   --text-xs: 14px;
   --text-xs--line-height: 1.3;
