@@ -6,7 +6,7 @@ import { recentMessages, sinceSummary } from "@/lib/chat-context";
 import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAISettings } from "./components";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { Diagram } from "./diagram";
-import { hasMath, MathPreview, MathText } from "./math-text";
+import { hasMath, MathText } from "./math-text";
 import { Button, Card, cn, ErrorMessage, IconButton, Input, Modal, Spinner, Textarea } from "./ui";
 
 // A summary stands in for the messages before it when the tutor replies.
@@ -16,6 +16,7 @@ export type ChatReply = { text: string; diagram?: DiagramData | null; name?: str
 // A conversation set aside by starting a new chat or switching to another. `clearedAt` identifies it; `lastAt` is its last message.
 export type PastChat = { clearedAt: string; lastAt: string; name: string; messages: ChatMessage[] };
 
+const bubble = "flex max-w-[90%] flex-col gap-2 rounded-lg px-3 py-2 text-sm";
 const when = (date: string) => new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 // Tutor conversation for problems, flashcards, topics, folders, and resources. Remount it with a new `key` for each item.
@@ -144,7 +145,7 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
 
   const render = (message: ChatMessage, i: number) => message.role === "summary"
     ? <div key={i} className="border-y border-line py-3 text-sm"><p className="mb-1 text-xs text-muted">Summary of the conversation above; the tutor now reads this instead</p><MathText className="leading-relaxed whitespace-pre-wrap" text={message.text} /></div>
-    : <div key={i} className={cn("flex max-w-[90%] flex-col gap-2 rounded-lg px-3 py-2 text-sm", message.role === "user" ? "self-end bg-accent-soft" : "self-start bg-subtle")}>
+    : <div key={i} className={cn(bubble, message.role === "user" ? "self-end bg-accent-soft" : "self-start bg-subtle")}>
       <MathText className="leading-relaxed whitespace-pre-wrap" text={message.text} />
       {message.diagram && <Diagram diagram={message.diagram} />}
     </div>;
@@ -183,7 +184,9 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     {summarize && leftOut && !busy && <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-1 text-xs text-muted">
       <span>Older messages no longer reach the tutor.</span><Button variant="ghost" size="sm" onClick={summarizeChat}>Summarize</Button>
     </div>}
-    {hasMath(text) && <MathPreview className="m-3 max-h-40 overflow-auto" text={text} />}
+    {/* The unsent message with its math typeset: the shape of the student's message it will become, but an outline
+        with muted text, where sent messages are filled. */}
+    {hasMath(text) && <div className="flex flex-col px-4 pb-3"><MathText className={cn(bubble, "block max-h-40 self-end overflow-auto border border-dashed border-line-strong leading-relaxed whitespace-pre-wrap text-muted")} text={text} /></div>}
     <form className="flex items-end gap-2 border-t border-line p-3" onSubmit={(event) => { event.preventDefault(); void ask(text); }}>
       {/* py-1.75 with a 24px line makes one line exactly h-control, so the buttons line up with it. */}
       <Textarea ref={input} rows={1} mathPreview={false} aria-label="Message the tutor" className="max-h-40 resize-none py-1.75 text-sm leading-6" value={text} onChange={(event) => setText(event.target.value)}
