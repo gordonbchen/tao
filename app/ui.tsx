@@ -56,6 +56,13 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cn(field, "block w-full resize-y px-3 py-2 leading-relaxed", className)} {...props} />;
 }
 
+// Native checkbox in the accent color. `indeterminate` shows a partial choice, such as some rows of a list.
+export function Checkbox({ indeterminate = false, className, ...props }: Omit<ComponentProps<"input">, "type"> & { indeterminate?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <input ref={ref} type="checkbox" className={cn("size-4 flex-none cursor-pointer accent-accent disabled:cursor-default", className)} {...props} />;
+}
+
 const badgeTones = { accent: "bg-accent-soft text-accent", neutral: "bg-subtle text-muted", danger: "bg-danger-soft text-danger" };
 
 // Never wider than its container: long text, such as a topic name, is truncated.

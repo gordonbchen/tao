@@ -1,5 +1,5 @@
 import { aiOptionsFromRequest, hasAiProvider, MAX_INSTRUCTIONS, PROBLEM_DEPTHS, type ProblemDepth } from "@/lib/ai";
-import { isUuid, jsonError, query } from "@/lib/db";
+import { isUuid, jsonError, query, uuidList } from "@/lib/db";
 import { ownsSubject } from "@/lib/domain";
 import { createProblem, listProblems, pickTopic, topicReview } from "@/lib/practice";
 import { shouldReuseDueProblem, type ProblemDifficulty } from "@/lib/scheduler";
@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: RouteContext) {
      FROM problems p JOIN topics t ON t.id = p.topic_id
      JOIN LATERAL (SELECT a.rating, a.correctness, a.created_at FROM attempts a WHERE a.problem_id = p.id
        ORDER BY a.created_at DESC LIMIT 1) latest ON true
-     WHERE p.subject_id = $1 AND p.topic_id = $2
+     WHERE p.subject_id = $1 AND p.topic_id = $2 AND p.archived_at IS NULL
        AND (latest.rating = 'could_not_solve' OR latest.correctness = 'incorrect')
      ORDER BY latest.created_at DESC LIMIT 1`,
     [subjectId, topic.id],
@@ -61,4 +61,29 @@ export async function POST(request: Request, { params }: RouteContext) {
     const message = error instanceof Error && error.message.startsWith("The tutor repeated") ? error.message : "The tutor could not generate a problem. Check the configured AI provider or try again.";
     return jsonError(message, 502);
   }
+}
+
+// Archives (`archived: true`) or restores the chosen problems, from Browse.
+export async function PATCH(request: Request, { params }: RouteContext) {
+  const { subjectId } = await params;
+  if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
+  let body: { ids?: unknown; archived?: unknown };
+  try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
+  const ids = uuidList(body.ids, 2000);
+  if (!ids || typeof body.archived !== "boolean") return jsonError("Choose up to 2,000 problems and whether to archive them");
+  // An archived problem keeps its first archive time.
+  await query(`UPDATE problems SET archived_at = CASE WHEN $3 THEN coalesce(archived_at, now()) END WHERE subject_id = $1 AND id = ANY($2::uuid[])`, [subjectId, ids, body.archived]);
+  return new Response(null, { status: 204 });
+}
+
+// Deletes the chosen problems with their attempts, feedback, and chats.
+export async function DELETE(request: Request, { params }: RouteContext) {
+  const { subjectId } = await params;
+  if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
+  let body: { ids?: unknown };
+  try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
+  const ids = uuidList(body.ids, 2000);
+  if (!ids) return jsonError("Choose up to 2,000 problems to delete");
+  await query("DELETE FROM problems WHERE subject_id = $1 AND id = ANY($2::uuid[])", [subjectId, ids]);
+  return new Response(null, { status: 204 });
 }

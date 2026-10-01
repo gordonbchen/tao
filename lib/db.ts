@@ -63,6 +63,11 @@ export function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
 }
 
+// Reads a list of 1 to `max` distinct UUIDs, such as the rows chosen for a bulk action, or null when it is invalid.
+export function uuidList(value: unknown, max: number) {
+  return Array.isArray(value) && value.length >= 1 && value.length <= max && value.every((id) => typeof id === "string" && isUuid(id)) ? [...new Set(value as string[])] : null;
+}
+
 export function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

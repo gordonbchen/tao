@@ -14,9 +14,9 @@ export async function GET(request: Request, { params }: RouteContext) {
   const search = new URL(request.url).searchParams;
   const selection = selectionFromSearch(search);
   if (typeof selection === "string") return jsonError(selection);
-  // `exclude` skips a card whose deletion is waiting on the undo toast.
-  const exclude = search.get("exclude");
-  if (exclude !== null && !isUuid(exclude)) return jsonError("Card not found", 404);
+  // `exclude` skips cards whose deletion is waiting on the undo toast.
+  const exclude = search.getAll("exclude");
+  if (exclude.length > 100 || !exclude.every(isUuid)) return jsonError("Card not found", 404);
   const [card, counts] = await Promise.all([nextCard(subjectId, selection, exclude), cardCounts(subjectId, selection)]);
   return Response.json({
     counts,

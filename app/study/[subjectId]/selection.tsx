@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { BookOpen, Folder } from "lucide-react";
 import { buildTree, descendantGroupIds, flattenTree, type TreeGroup, type TreeTopic } from "@/lib/topic-tree";
-import { Button, Modal } from "../../ui";
+import { Button, Checkbox, Modal } from "../../ui";
 
 // Any mix of topics and folders; empty means every topic.
 export type StudySelection = { topicIds: string[]; groupIds: string[] };
@@ -48,7 +48,7 @@ export function SelectionDialog({ value, topics, groups, onApply, onClose, apply
         const Icon = isGroup ? Folder : BookOpen;
         return <li key={id}>
           <label className="flex h-control-sm cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-hover has-disabled:cursor-default has-disabled:hover:bg-transparent" style={{ paddingLeft: 8 + row.depth * 24 }}>
-            <input type="checkbox" className="size-4 flex-none accent-accent" checked={checked} disabled={inherited} onChange={() => toggle(isGroup ? "groupIds" : "topicIds", id)} />
+            <Checkbox checked={checked} disabled={inherited} onChange={() => toggle(isGroup ? "groupIds" : "topicIds", id)} />
             <Icon size={16} className="flex-none text-muted" />
             <span className={isGroup ? "truncate font-semibold" : "truncate"}>{isGroup ? row.group.name : row.topic.name}</span>
           </label>

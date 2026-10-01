@@ -30,9 +30,9 @@ export async function subjectMaterial(subjectId: string, question: string) {
         count(*) FILTER (WHERE at.rating = 'could_not_solve')::int AS could_not_solve, count(*) FILTER (WHERE at.rating = 'hard')::int AS hard, max(at.created_at) AS last_attempt
         FROM attempts at JOIN problems p ON p.id = at.problem_id WHERE p.topic_id = t.id) a
       CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE pf.skipped)::int AS skipped,
-        count(*) FILTER (WHERE p.served_at IS NOT NULL AND pf.skipped IS NOT TRUE AND NOT EXISTS (SELECT 1 FROM attempts WHERE problem_id = p.id))::int AS unfinished
+        count(*) FILTER (WHERE p.served_at IS NOT NULL AND p.archived_at IS NULL AND pf.skipped IS NOT TRUE AND NOT EXISTS (SELECT 1 FROM attempts WHERE problem_id = p.id))::int AS unfinished
         FROM problems p LEFT JOIN problem_feedback pf ON pf.problem_id = p.id WHERE p.topic_id = t.id) f
-      CROSS JOIN LATERAL (SELECT count(*)::int AS cards, count(*) FILTER (WHERE due <= now())::int AS due, coalesce(sum(lapses), 0)::int AS lapses FROM cards WHERE topic_id = t.id) c
+      CROSS JOIN LATERAL (SELECT count(*)::int AS cards, count(*) FILTER (WHERE due <= now() AND archived_at IS NULL)::int AS due, coalesce(sum(lapses), 0)::int AS lapses FROM cards WHERE topic_id = t.id) c
       CROSS JOIN LATERAL (SELECT count(*)::int AS reviews, count(*) FILTER (WHERE cv.rating = 1)::int AS forgotten FROM card_reviews cv JOIN cards cd ON cd.id = cv.card_id
         WHERE cd.topic_id = t.id AND cv.reviewed_at > now() - interval '30 days') cr
       WHERE t.subject_id = $1 ORDER BY t.position, t.created_at`, [subjectId]),

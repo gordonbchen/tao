@@ -1,7 +1,7 @@
 import { cleanDrafts, MAX_IMPORT_CARDS } from "@/lib/card-import";
 import { cleanDiagram } from "@/lib/diagrams";
 import { listCards } from "@/lib/cards";
-import { isUuid, jsonError, query } from "@/lib/db";
+import { isUuid, jsonError, query, uuidList } from "@/lib/db";
 import { getTopicInSubject, ownsSubject } from "@/lib/domain";
 import { selectionFromSearch } from "@/lib/selection";
 
@@ -38,4 +38,29 @@ export async function POST(request: Request, { params }: RouteContext) {
     FROM jsonb_to_recordset($3::jsonb) AS c(front text, back text, "frontDiagram" jsonb, "backDiagram" jsonb)`,
   [subjectId, topicId, JSON.stringify(cards), body.source, JSON.stringify(metadata)]);
   return Response.json({ created: result.rowCount }, { status: 201 });
+}
+
+// Archives (`archived: true`) or restores the chosen cards, from Browse.
+export async function PATCH(request: Request, { params }: RouteContext) {
+  const { subjectId } = await params;
+  if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
+  let body: { ids?: unknown; archived?: unknown };
+  try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
+  const ids = uuidList(body.ids, 5000);
+  if (!ids || typeof body.archived !== "boolean") return jsonError("Choose up to 5,000 cards and whether to archive them");
+  // An archived card keeps its first archive time.
+  await query(`UPDATE cards SET archived_at = CASE WHEN $3 THEN coalesce(archived_at, now()) END WHERE subject_id = $1 AND id = ANY($2::uuid[])`, [subjectId, ids, body.archived]);
+  return new Response(null, { status: 204 });
+}
+
+// Deletes the chosen cards with their review history and chats.
+export async function DELETE(request: Request, { params }: RouteContext) {
+  const { subjectId } = await params;
+  if (!isUuid(subjectId) || !(await ownsSubject(subjectId))) return jsonError("Subject not found", 404);
+  let body: { ids?: unknown };
+  try { body = await request.json(); } catch { return jsonError("Expected a JSON request body"); }
+  const ids = uuidList(body.ids, 5000);
+  if (!ids) return jsonError("Choose up to 5,000 cards to delete");
+  await query("DELETE FROM cards WHERE subject_id = $1 AND id = ANY($2::uuid[])", [subjectId, ids]);
+  return new Response(null, { status: 204 });
 }

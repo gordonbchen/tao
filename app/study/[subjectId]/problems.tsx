@@ -7,14 +7,15 @@ import { aiApi, api, isAbort, notifyAiSetupRequired, readDraft, saveDraft, useAI
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
-import { Badge, Button, Card, cn, ErrorMessage, Field, Input, Modal, Select, Spinner, Textarea, ToggleButton } from "../../ui";
+import { Badge, Button, Card, cn, ErrorMessage, Field, Modal, Select, Spinner, Textarea, ToggleButton } from "../../ui";
+import { BrowseDialog, type BrowseAction } from "./browse";
 import { selectionQuery, type StudySelection } from "./selection";
 
 type Problem = { id: string; topicId: string; prompt: string; difficulty: string; diagram?: DiagramData | null; isReview?: boolean; messages?: ChatMessage[] };
 type Correctness = "correct" | "partial" | "incorrect" | "uncertain";
 type Feedback = { feedback: string; correctness: Correctness; solution?: string; solutionDiagram?: DiagramData | null };
 type Attempt = Feedback & { answer: string; rating: string };
-type PastProblem = { id: string; topicName: string | null; prompt: string; difficulty: string; createdAt: string; attempts: number; correctness: Correctness | null; skipped: boolean };
+type PastProblem = { id: string; archived: boolean; topicName: string | null; prompt: string; difficulty: string; createdAt: string; attempts: number; correctness: Correctness | null; skipped: boolean };
 const resultLabels: Record<Correctness, string> = { correct: "Correct", partial: "Partly right", incorrect: "Incorrect", uncertain: "Unsure" };
 const ratings = [{ value: "easy", label: "Easy" }, { value: "okay", label: "Okay" }, { value: "hard", label: "Hard" }, { value: "could_not_solve", label: "Couldn’t solve" }];
 const skipReasons = [
@@ -130,6 +131,11 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
       .finally(() => setLoading(false));
   }, [subjectId, selection, show]);
 
+  // A deleted problem cannot stay open; the tab goes back to making one.
+  function browseChanged(action: BrowseAction, ids: string[]) {
+    if (action === "delete" && problem && ids.includes(problem.id)) { stop(); setProblem(null); setFeedback(null); }
+  }
+
   function saveSettings(next: Settings) {
     setSettings(next);
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* Keep them for this visit only. */ }
@@ -192,7 +198,14 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     <Button variant="ghost" onClick={() => setBrowsing(true)}><ListIcon size={16} />Browse</Button>
   </div>;
   const dialogs = <>
-    {browsing && <BrowseDialog subjectId={subjectId} selection={selection} onOpen={open} onClose={() => setBrowsing(false)} />}
+    {browsing && <BrowseDialog<PastProblem> noun="problem" url={`/api/subjects/${subjectId}/problems?${selectionQuery(selection)}`} field="problems" endpoint={`/api/subjects/${subjectId}/problems`}
+      columns="grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto]" searchText={(past) => `${past.prompt}\n${past.topicName ?? ""}`}
+      cells={(past) => <>
+        <span className="truncate">{past.prompt}</span>
+        <span className="truncate text-muted">{past.topicName ?? "No topic"}</span>
+        <span className="text-xs text-muted">{past.correctness ? resultLabels[past.correctness] : past.skipped ? "Skipped" : "Not answered"} · {new Date(past.createdAt).toLocaleDateString()}</span>
+      </>}
+      onOpen={(past) => void open(past.id)} onChange={browseChanged} onClose={() => setBrowsing(false)} />}
     {choosingSettings && <Modal title="New problem" onClose={() => setChoosingSettings(false)}>
       <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); setChoosingSettings(false); void generate(true); }}>
         {settingsFields}
@@ -261,31 +274,4 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
     </div>
     <Chat key={problem.id} draftKey={`chat:problem:${problem.id}`} className="max-lg:h-[min(32rem,75dvh)] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-48px)]" hint="Can I get a small hint?" initialMessages={problem.messages} send={askTutor} placeholder="Where are you stuck?" empty="Tell the tutor where you are stuck, or use the lightbulb for a hint." />
   </div>{dialogs}</>;
-}
-
-function BrowseDialog({ subjectId, selection, onOpen, onClose }: { subjectId: string; selection: StudySelection; onOpen: (id: string) => void; onClose: () => void }) {
-  const [problems, setProblems] = useState<PastProblem[] | null>(null);
-  const [search, setSearch] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    api<{ problems: PastProblem[] }>(`/api/subjects/${subjectId}/problems?${selectionQuery(selection)}`).then((result) => setProblems(result.problems)).catch((e) => setError(e.message));
-  }, [subjectId, selection]);
-  const needle = search.trim().toLocaleLowerCase();
-  const shown = (problems ?? []).filter((problem) => !needle || `${problem.prompt}\n${problem.topicName ?? ""}`.toLocaleLowerCase().includes(needle));
-
-  return <Modal title="Problems" subtitle={problems ? `${problems.length.toLocaleString()} in this selection` : "Loading…"} onClose={onClose} wide>
-    <Input className="mb-4 w-full" aria-label="Search problems" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" autoFocus />
-    {error && <ErrorMessage>{error}</ErrorMessage>}
-    {!problems ? <p className="inline-flex items-center gap-3 text-muted"><Spinner />Loading problems…</p> : <ul className="border-t border-line">
-      {shown.slice(0, 300).map((problem) => <li key={problem.id} className="border-b border-line">
-        <button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto] items-center gap-4 py-3 text-left text-sm transition-colors hover:bg-hover max-sm:grid-cols-1" onClick={() => onOpen(problem.id)}>
-          <span className="truncate">{problem.prompt}</span>
-          <span className="truncate text-muted">{problem.topicName ?? "No topic"}</span>
-          <span className="text-xs text-muted">{problem.correctness ? resultLabels[problem.correctness] : problem.skipped ? "Skipped" : "Not answered"} · {new Date(problem.createdAt).toLocaleDateString()}</span>
-        </button>
-      </li>)}
-      {shown.length > 300 && <li className="py-3 text-sm text-muted">Showing 300 of {shown.length.toLocaleString()}. Search to narrow the list.</li>}
-      {!shown.length && <li className="py-3 text-sm text-muted">{problems.length ? "No problems match." : "No problems yet."}</li>}
-    </ul>}
-  </Modal>;
 }

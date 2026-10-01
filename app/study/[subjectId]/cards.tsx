@@ -4,18 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { ChevronDown, List as ListIcon, Pencil, Plus, Sparkles, Upload } from "lucide-react";
 import type { Diagram as DiagramData } from "@/lib/diagrams";
 import { buildTree, flattenTree, groupPath, type TreeGroup, type TreeTopic } from "@/lib/topic-tree";
-import { aiApi, aiStream, api, getAiRequestHeaders, notifyAiSetupRequired, scheduleUndoDelete, useAISettings } from "../../components";
+import { aiApi, aiStream, api, getAiRequestHeaders, notifyAiSetupRequired, pendingRemovals, scheduleUndoDelete, useAISettings } from "../../components";
 import { Chat, type ChatMessage } from "../../chat";
 import { Diagram } from "../../diagram";
 import { MathText } from "../../math-text";
-import { Badge, Button, Card, cn, ErrorMessage, Field, IconButton, Input, Modal, Select, Spinner, Textarea } from "../../ui";
+import { Badge, Button, Card, Checkbox, cn, ErrorMessage, Field, IconButton, Modal, Select, Spinner, Textarea } from "../../ui";
+import { BrowseDialog } from "./browse";
 import { selectionLabel, SelectionDialog, selectionQuery, type StudySelection } from "./selection";
 
 type Rating = 1 | 2 | 3 | 4;
 type Figures = { frontDiagram?: DiagramData | null; backDiagram?: DiagramData | null };
 type ReviewCard = Figures & { id: string; topicId: string | null; topicName: string | null; front: string; back: string; intervals: Record<Rating, string>; messages: ChatMessage[] };
 type Counts = { new: number; learning: number; review: number; total: number; nextDue: string | null };
-type StoredCard = Figures & { id: string; topicId: string | null; topicName: string | null; front: string; back: string; due: string; state: number };
+type StoredCard = Figures & { id: string; archived: boolean; topicId: string | null; topicName: string | null; front: string; back: string; due: string; state: number };
 type Draft = Figures & { front: string; back: string };
 type GeneratedDraft = Draft & { topicId: string; topicName: string };
 type Dialog = { kind: "add" | "import" | "generate" | "browse" } | { kind: "edit"; card: Figures & { id: string; topicId: string | null; front: string; back: string } };
@@ -47,10 +48,11 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
   const generation = useGeneration(subjectId);
   const query = selectionQuery(selection);
 
-  // `exclude` skips a card whose deletion is waiting on the undo toast.
-  const load = useCallback(async (exclude?: string) => {
+  // Skips cards whose deletion is waiting on the undo toast.
+  const load = useCallback(async () => {
+    const exclude = pendingRemovals().slice(0, 100).map((id) => `&exclude=${id}`).join("");
     try {
-      const result = await api<{ card: ReviewCard | null; counts: Counts }>(`/api/subjects/${subjectId}/cards/next?${query}${exclude ? `&exclude=${exclude}` : ""}`);
+      const result = await api<{ card: ReviewCard | null; counts: Counts }>(`/api/subjects/${subjectId}/cards/next?${query}${exclude}`);
       setCard(result.card); setCounts(result.counts); setRevealed(false); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load cards"); }
     finally { setLoading(false); }
@@ -98,7 +100,7 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
       commit: () => api(`/api/cards/${id}`, { method: "DELETE" }).then(() => {}),
       restore: () => void load(),
     });
-    void load(id);
+    void load();
   }
 
   const defaultTopicId = selection.topicIds.length === 1 && !selection.groupIds.length ? selection.topicIds[0] : card?.topicId ?? null;
@@ -153,7 +155,14 @@ export function Cards({ subjectId, topics, groups, selection }: { subjectId: str
     {dialog?.kind === "edit" && <CardEditor subjectId={subjectId} topics={topics} groups={groups} card={dialog.card} topicId={dialog.card.topicId} onClose={closeDialog} onDelete={removeCard} />}
     {dialog?.kind === "import" && <ImportDialog subjectId={subjectId} topics={topics} groups={groups} topicId={defaultTopicId} onClose={closeDialog} />}
     {dialog?.kind === "generate" && <GenerateDialog subjectId={subjectId} topics={topics} groups={groups} selection={selection} onClose={closeDialog} />}
-    {dialog?.kind === "browse" && <BrowseDialog subjectId={subjectId} query={query} onEdit={(edited) => setDialog({ kind: "edit", card: edited })} onClose={() => closeDialog(false)} />}
+    {dialog?.kind === "browse" && <BrowseDialog<StoredCard> noun="card" url={`/api/subjects/${subjectId}/cards?${query}`} field="cards" endpoint={`/api/subjects/${subjectId}/cards`}
+      columns="grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" searchText={(stored) => `${stored.front}\n${stored.back}\n${stored.topicName ?? ""}`}
+      cells={(stored) => <>
+        <span className="truncate">{stored.front}</span>
+        <span className="truncate text-muted">{stored.back}</span>
+        <span className="text-xs text-muted">{stored.state === 0 ? "New" : `Due ${new Date(stored.due).toLocaleDateString()}`}</span>
+      </>}
+      onOpen={(stored) => setDialog({ kind: "edit", card: stored })} onChange={() => void load()} onClose={() => closeDialog(false)} />}
   </>;
 }
 
@@ -242,7 +251,7 @@ function DraftList({ drafts, showTopics, kept, onToggle }: { drafts: (Draft & { 
     <ul className="max-h-[50vh] overflow-auto border-t border-line">
       {shown.map((draft, index) => <li key={index} className="border-b border-line">
         <label className={cn("flex gap-3 py-3 text-sm", kept && "cursor-pointer")}>
-          {kept && <input type="checkbox" className="mt-1 size-4 flex-none accent-accent" checked={kept.has(index)} onChange={() => onToggle?.(index)} />}
+          {kept && <Checkbox className="mt-1" checked={kept.has(index)} onChange={() => onToggle?.(index)} />}
           <span className="grid min-w-0 flex-1 grid-cols-2 gap-4 max-sm:grid-cols-1">
             <span className="min-w-0">
               {showTopics && <span className="mb-1 block text-xs text-muted">{draft.topicName}</span>}
@@ -426,7 +435,7 @@ function GenerateDialog({ subjectId, topics, groups, selection: initialSelection
         {Object.entries(densities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </Select></Field>
       <label className="flex cursor-pointer items-center gap-2 text-sm" title="Mermaid for structure such as processes and timelines, SVG for drawings such as geometry. Generated figures can be wrong.">
-        <input type="checkbox" className="size-4 accent-accent" checked={diagrams} onChange={(event) => {
+        <Checkbox checked={diagrams} onChange={(event) => {
           setDiagrams(event.target.checked);
           try { localStorage.setItem(DIAGRAMS_KEY, String(event.target.checked)); } catch { /* Keep it for this dialog only. */ }
         }} />
@@ -454,32 +463,5 @@ function GenerateDialog({ subjectId, topics, groups, selection: initialSelection
         <Button variant="primary" onClick={() => void save()} disabled={Boolean(progress) || saving || !keptCount}>{saving ? <><Spinner />Saving…</> : `Keep ${keptCount} cards`}</Button>
       </div>
     </div>}
-  </Modal>;
-}
-
-function BrowseDialog({ subjectId, query, onEdit, onClose }: { subjectId: string; query: string; onEdit: (card: StoredCard) => void; onClose: () => void }) {
-  const [cards, setCards] = useState<StoredCard[] | null>(null);
-  const [search, setSearch] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    api<{ cards: StoredCard[] }>(`/api/subjects/${subjectId}/cards?${query}`).then((result) => setCards(result.cards)).catch((e) => setError(e.message));
-  }, [subjectId, query]);
-  const needle = search.trim().toLocaleLowerCase();
-  const shown = (cards ?? []).filter((card) => !needle || `${card.front}\n${card.back}\n${card.topicName ?? ""}`.toLocaleLowerCase().includes(needle));
-
-  return <Modal title="Cards" subtitle={cards ? `${cards.length.toLocaleString()} in this selection` : "Loading…"} onClose={onClose} wide>
-    <Input className="mb-4 w-full" aria-label="Search cards" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" autoFocus />
-    {error && <ErrorMessage>{error}</ErrorMessage>}
-    {!cards ? <p className="inline-flex items-center gap-3 text-muted"><Spinner />Loading cards…</p> : <ul className="border-t border-line">
-      {shown.slice(0, 300).map((card) => <li key={card.id} className="border-b border-line">
-        <button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-4 py-3 text-left text-sm transition-colors hover:bg-hover max-sm:grid-cols-1" onClick={() => onEdit(card)}>
-          <span className="truncate">{card.front}</span>
-          <span className="truncate text-muted">{card.back}</span>
-          <span className="text-xs text-muted">{card.state === 0 ? "New" : `Due ${new Date(card.due).toLocaleDateString()}`}</span>
-        </button>
-      </li>)}
-      {shown.length > 300 && <li className="py-3 text-sm text-muted">Showing 300 of {shown.length.toLocaleString()}. Search to narrow the list.</li>}
-      {!shown.length && <li className="py-3 text-sm text-muted">No cards match.</li>}
-    </ul>}
   </Modal>;
 }

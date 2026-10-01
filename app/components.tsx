@@ -104,22 +104,26 @@ function requestId() {
 }
 
 type UndoState = { message: string; undo: () => void; commit: () => Promise<void>; restore: () => void };
-let pendingUndo: { id: string; state: UndoState; timer: ReturnType<typeof setTimeout> } | null = null;
+let pendingUndo: { ids: string[]; state: UndoState; timer: ReturnType<typeof setTimeout> } | null = null;
 const undoListeners = new Set<(state: UndoState | null) => void>();
 const pendingRemovalIds = new Set<string>();
 
 export function isPendingRemoval(id: string) { return pendingRemovalIds.has(id); }
+export function pendingRemovals() { return [...pendingRemovalIds]; }
 
 function publishUndo(state: UndoState | null) { undoListeners.forEach((listener) => listener(state)); }
 
-export function scheduleUndoDelete(id: string, state: Omit<UndoState, "undo">) {
+// Removes `id` (or several, deleted together) after the undo toast's 10 seconds.
+export function scheduleUndoDelete(id: string | string[], state: Omit<UndoState, "undo">) {
+  const ids = [id].flat();
+  const forget = (list: string[]) => list.forEach((each) => pendingRemovalIds.delete(each));
   if (pendingUndo) {
     clearTimeout(pendingUndo.timer);
     const previous = pendingUndo.state;
-    const previousId = pendingUndo.id;
+    const previousIds = pendingUndo.ids;
     pendingUndo = null;
     publishUndo(null);
-    pendingRemovalIds.delete(previousId);
+    forget(previousIds);
     void previous.commit().then(() => window.dispatchEvent(new Event("tao:refresh"))).catch(() => {
       previous.restore();
       window.dispatchEvent(new CustomEvent("tao:error", { detail: "Could not remove item." }));
@@ -129,7 +133,7 @@ export function scheduleUndoDelete(id: string, state: Omit<UndoState, "undo">) {
     if (!pendingUndo || pendingUndo.state !== entry) return;
     clearTimeout(pendingUndo.timer);
     pendingUndo = null;
-    pendingRemovalIds.delete(id);
+    forget(ids);
     publishUndo(null);
     entry.restore();
     window.dispatchEvent(new Event("tao:refresh"));
@@ -137,7 +141,7 @@ export function scheduleUndoDelete(id: string, state: Omit<UndoState, "undo">) {
   const timer = setTimeout(async () => {
     if (pendingUndo?.state !== entry) return;
     pendingUndo = null;
-    pendingRemovalIds.delete(id);
+    forget(ids);
     publishUndo(null);
     try {
       await entry.commit();
@@ -148,8 +152,8 @@ export function scheduleUndoDelete(id: string, state: Omit<UndoState, "undo">) {
       window.dispatchEvent(new CustomEvent("tao:error", { detail: "Could not remove item." }));
     }
   }, 10_000);
-  pendingRemovalIds.add(id);
-  pendingUndo = { id, state: entry, timer };
+  ids.forEach((each) => pendingRemovalIds.add(each));
+  pendingUndo = { ids, state: entry, timer };
   publishUndo(entry);
 }
 
@@ -161,7 +165,7 @@ function UndoToast() {
     return () => { undoListeners.delete(setState); };
   }, []);
   if (!state) return null;
-  return <div role="status" className="fixed bottom-6 left-1/2 z-30 flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-4 rounded-lg border border-line bg-surface py-2 pr-2 pl-4 text-sm shadow-float">
+  return <div role="status" className="fixed bottom-12 left-1/2 z-30 flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-4 rounded-lg border border-line bg-surface py-2 pr-2 pl-4 text-sm shadow-float">
     <span className="min-w-0 truncate">{state.message}</span><Button size="sm" onClick={state.undo}>Undo</Button>
   </div>;
 }
