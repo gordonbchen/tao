@@ -253,7 +253,7 @@ export function Problems({ subjectId, topics, selection }: { subjectId: string; 
       {problemFeedbackSaved && <p className="text-sm text-muted" role="status">Thanks, your feedback will guide future questions on this topic.</p>}
       {error && <ErrorMessage className="my-0">{error}</ErrorMessage>}
       {!feedback ? <Card className="p-4"><form onSubmit={submitAttempt}>
-        <Textarea ref={answerInput} rows={4} className="min-h-32 border-0 px-0 hover:border-0" aria-label="Your answer" value={answer} onChange={e => { setAnswer(e.target.value); saveDraft(`answer:${problem.id}`, e.target.value); }} placeholder="Write your answer…" />
+        <Textarea ref={answerInput} rows={4} className="min-h-32 border-0 px-2 hover:border-0" aria-label="Your answer" value={answer} onChange={e => { setAnswer(e.target.value); saveDraft(`answer:${problem.id}`, e.target.value); }} placeholder="Write your answer…" />
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="How hard was it?">{ratings.map(option => <ToggleButton key={option.value} pressed={rating === option.value} onClick={() => setRating(option.value)}>{option.label}</ToggleButton>)}</div>
           <div className="flex items-center gap-2">
