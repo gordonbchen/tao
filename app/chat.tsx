@@ -189,8 +189,13 @@ export function Chat({ initialMessages = [], initialName = "", draftKey, send, p
     {hasMath(text) && <div className="flex flex-col px-4 pb-3"><MathText className={cn(bubble, "block max-h-40 self-end overflow-auto border border-dashed border-line-strong leading-relaxed whitespace-pre-wrap text-muted")} text={text} /></div>}
     <form className="flex items-end gap-2 border-t border-line p-3" onSubmit={(event) => { event.preventDefault(); void ask(text); }}>
       {/* py-1.75 with a 24px line makes one line exactly h-control, so the buttons line up with it. */}
-      <Textarea ref={input} rows={1} mathPreview={false} aria-label="Message the tutor" className="max-h-40 resize-none py-1.75 text-sm leading-6" value={text} onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(text); } }} placeholder={placeholder} />
+      {/* Browsers ignore text-overflow on a textarea's placeholder, so a long one, such as a filename, is drawn over the
+          empty box on one line with an ellipsis instead of wrapping and growing it. */}
+      <div className="relative min-w-0 flex-1">
+        <Textarea ref={input} rows={1} mathPreview={false} aria-label="Message the tutor" aria-placeholder={placeholder} className="max-h-40 resize-none py-1.75 text-sm leading-6" value={text} onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(text); } }} />
+        {!text && <span aria-hidden className="pointer-events-none absolute inset-x-px top-px truncate px-3 py-1.75 text-sm leading-6 text-muted">{placeholder}</span>}
+      </div>
       {hint && <IconButton label="Get a hint" onClick={() => void ask(hint)} disabled={!!busy}><Lightbulb size={18} /></IconButton>}
       {summarize && unsummarized.length >= 2 && <IconButton label="Summarize chat" onClick={summarizeChat} disabled={!!busy}><ListCollapse size={18} /></IconButton>}
       {stopper ? <IconButton label="Stop" className="text-accent" onClick={() => stopper.abort()}><Square size={16} fill="currentColor" /></IconButton>
